@@ -1,15 +1,19 @@
-import { BlogPosts } from 'app/components/posts'
+import { BlogPosts } from "app/components/posts";
+import ParticlesBackrgound from "app/components/ParticlesBackrgound";
 
 export const metadata = {
-  title: 'Blog',
-  description: 'Read my blog.',
-}
+	title: "Blog",
+	description:
+		"Articles of my own Cloud Journey, interesting news, projects and more.",
+};
 
 export default function Page() {
-  return (
-    <section>
-      <h1 className="font-semibold text-2xl mb-8 tracking-tighter">My Blog</h1>
-      <BlogPosts />
-    </section>
-  )
+	return (
+		<section>
+			<ParticlesBackrgound />
+
+			<h1 className="font-semibold text-2xl mb-8 tracking-tighter">Blog</h1>
+			<BlogPosts />
+		</section>
+	);
 }
