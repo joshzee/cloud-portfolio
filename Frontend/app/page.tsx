@@ -1,7 +1,6 @@
 import { BlogPosts } from "app/components/posts";
 import { ExperienceList } from "app/components/experience";
 import ParticlesBackrgound from "app/components/ParticlesBackrgound";
-import TransitionEffect from "app/components/TransitionEffect";
 import Image from "next/image";
 import ProfilePic from "./images/self.jpg";
 export default function Page() {
@@ -14,7 +13,7 @@ export default function Page() {
 				alt="Profile Picture"
 				className="profile-img"
 			/>
-			<h1 className="text-2xl font-semibold tracking-tighter home-header align-top justify-center pt-12">
+			<h1 className="text-[#64b7b9]  text-2xl font-semibold tracking-tighter home-header align-top justify-center pt-12">
 				Joshua Zarazovski
 			</h1>
 			<p className="mb-4">

@@ -6,9 +6,7 @@ import { Navbar } from "./components/nav";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import Footer from "./components/footer";
-import ParticlesContainer from "./components/ParticlesBackrgound";
 import { baseUrl } from "./sitemap";
-import dynamic from "next/dynamic";
 
 export const metadata: Metadata = {
 	metadataBase: new URL(baseUrl),
@@ -18,10 +16,10 @@ export const metadata: Metadata = {
 	},
 	description: "Melbourne Web Developer, Cloud Enthusiast, and AI Advocate",
 	openGraph: {
-		title: "My Portfolio",
-		description: "This is my portfolio.",
+		title: "Joshua Zarazovski",
+		description: "Portfolio by Joshua Zarazovski.",
 		url: baseUrl,
-		siteName: "My Portfolio",
+		siteName: "Joshua Zarazovski",
 		locale: "en_US",
 		type: "website",
 	},
