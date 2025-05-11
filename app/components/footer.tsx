@@ -26,8 +26,10 @@ export default function Footer() {
 		)
 			.then((response) => response.json())
 			.then((data) => {
-				document.getElementById("visitor_count").textContent =
-					data["visitorcount"];
+				const visitorCountElement = document.getElementById("visitor_count");
+				if (visitorCountElement) {
+					visitorCountElement.textContent = data["visitorcount"];
+				}
 			});
 	}, []);
 
