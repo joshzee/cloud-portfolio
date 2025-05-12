@@ -1,5 +1,6 @@
 import { BlogPosts } from "app/components/posts";
 import { ExperienceList } from "app/components/experience";
+import { ProjectList } from "app/components/projects";
 import ParticlesBackrgound from "app/components/ParticlesBackrgound";
 import Image from "next/image";
 import ProfilePic from "./images/self.jpg";
@@ -25,6 +26,9 @@ export default function Page() {
 			</p>
 			<div className="my-8">
 				<ExperienceList />
+			</div>
+			<div className="my-8">
+				<ProjectList />
 			</div>
 			<ParticlesBackrgound />
 		</section>
