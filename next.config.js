@@ -5,6 +5,12 @@ const nextConfig = {
 	reactStrictMode: true,
 	output: "export",
 	images: { unoptimized: true },
+
+	experimental: {
+		outputFileTracingIncludes: {
+			"/api": ["./public/**/*"],
+		},
+	},
 };
 
 module.exports = nextConfig;
