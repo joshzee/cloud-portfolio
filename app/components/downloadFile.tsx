@@ -5,7 +5,7 @@ import { useRef } from "react";
 export function DownloadFile() {
 	const linkRef = useRef(null);
 	const handleDownload = async () => {
-		const response = await fetch("http://localhost:3000/api/download");
+		const response = await fetch("http://joshcod.es/api/download");
 		const blob = await response.blob();
 		const url = window.URL.createObjectURL(blob);
 		const link = linkRef.current as HTMLAnchorElement | null;
