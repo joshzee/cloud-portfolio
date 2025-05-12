@@ -7,8 +7,8 @@ const navItems = {
 	"/blog": {
 		name: "blog",
 	},
-	"/resume.pdf": {
-		name: "resume",
+	"https://github.com/joshzee/cloud-portfolio": {
+		name: "source",
 	},
 };
 

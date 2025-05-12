@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-
+import Link from "next/link";
 function ArrowIcon() {
 	return (
 		<svg
@@ -11,6 +11,7 @@ function ArrowIcon() {
 			fill="none"
 			xmlns="http://www.w3.org/2000/svg"
 		>
+			<title>Arrow Icon</title>
 			<path
 				d="M2.07102 11.3494L0.963068 10.2415L9.2017 1.98864H2.83807L2.85227 0.454545H11.8438V9.46023H10.2955L10.3097 3.09659L2.07102 11.3494Z"
 				fill="currentColor"
@@ -41,7 +42,7 @@ export default function Footer() {
 						className="flex items-center transition-all hover:text-neutral-800 dark:hover:text-[#64b7b9]"
 						rel="noopener noreferrer"
 						target="_blank"
-						href="/rss"
+						href="https://www.linkedin.com/in/joshuazarazovski/"
 					>
 						<ArrowIcon />
 						<p className="ml-2 h-7">linkedin</p>
@@ -58,17 +59,26 @@ export default function Footer() {
 						<p className="ml-2 h-7">github</p>
 					</a>
 				</li>
-				<li>
-					<a
+				{/* <li>
+					<p
 						className="flex items-center transition-all hover:text-neutral-800 dark:hover:text-[#64b7b9]"
 						rel="noopener noreferrer"
-						target="_blank"
-						href="https://github.com/joshzee/cloud-portfolio"
 					>
 						<ArrowIcon />
-						<p className="ml-2 h-7">view source</p>
-					</a>
-				</li>
+						<span className="ml-2 h-7">
+							<Link
+								href={"./resume.pdf"}
+								target="_blank"
+								aria-label="Downlod Resume"
+								rel="noopener noreferrer"
+								locale={false}
+								download
+							>
+								resume
+							</Link>
+						</span>
+					</p>
+				</li> */}
 			</ul>
 			<div className="flex flex-row justify-between">
 				<p className="mt-8 text-neutral-600 dark:text-neutral-300">
