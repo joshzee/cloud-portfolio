@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { DownloadFile } from "./downloadFile";
 import Link from "next/link";
 function ArrowIcon() {
 	return (
@@ -59,26 +60,17 @@ export default function Footer() {
 						<p className="ml-2 h-7">github</p>
 					</a>
 				</li>
-				{/* <li>
+				<li>
 					<p
 						className="flex items-center transition-all hover:text-neutral-800 dark:hover:text-[#64b7b9]"
 						rel="noopener noreferrer"
 					>
 						<ArrowIcon />
 						<span className="ml-2 h-7">
-							<Link
-								href={"./resume.pdf"}
-								target="_blank"
-								aria-label="Downlod Resume"
-								rel="noopener noreferrer"
-								locale={false}
-								download
-							>
-								resume
-							</Link>
+							<DownloadFile />
 						</span>
 					</p>
-				</li> */}
+				</li>
 			</ul>
 			<div className="flex flex-row justify-between">
 				<p className="mt-8 text-neutral-600 dark:text-neutral-300">
