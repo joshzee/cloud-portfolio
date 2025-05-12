@@ -29,7 +29,7 @@ export function BlogPosts() {
 								{post.metadata.title}
 							</p>
 						</div>
-						<p className="w-full flex justify-center align-middletext-neutral-600 dark:text-neutral-400 tracking-tight">
+						<p className="w-full flex justify-center sm:justify-items-start align-middle text-neutral-600 dark:text-neutral-400 tracking-tight">
 							{post.metadata.summary}
 						</p>
 					</Link>
