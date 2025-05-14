@@ -17,22 +17,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-
-<<<<<<< HEAD
-=======
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          
->>>>>>> af1a52685df3770fc1489566d7a7e5be85aa0640
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10
         
       - name: Set up Node.js
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'pnpm'

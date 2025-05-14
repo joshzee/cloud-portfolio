@@ -6,7 +6,7 @@ export function ExperienceList() {
 				Experience
 			</h1>
 			<p className="text-neutral-900 dark:text-neutral-100 tracking-tight">
-				- To-Do (soon)
+				- To-Do (Soon)
 			</p>
 		</div>
 	);
