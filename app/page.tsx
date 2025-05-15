@@ -19,7 +19,7 @@ export default function Page() {
 			</h1>
 			<p className="mb-4">
 				{`I'm a Cloud enthusiast and AI advocate, finding unmatched effectivenes and efficiency in
-        AWS' wide range of services for Developers, Operations, QA Testers, Support and many more. I started off 12+ years ago in ActionScript/Flash Development (RIP)
+        AWS' wide range of services for Developers, Operations, QA Testers, Software & Support Engineers and many more. I started off 12+ years ago in ActionScript/Flash Development (RIP)
         and have worn many hats since then. I now find myself heavily involved in Enterprise and AI Technical Support, debugging code and Cloud infrastructure. I'm currently working mainly with DynamoDB,
         Cloudwatch, S3, API Gateway and Lambda, which combined, is a great serverless approach to solve the challenges that the organisation faces tackling
         AI hallucinations, Prompt Generation and more. When I'm not at work, I enjoy jigging around my Homelab, Exercise Physiology, Keeping Fit, New Tech, Comics and playing with my Dog.`}
