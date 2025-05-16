@@ -9,16 +9,16 @@ This project consists of a personal portfolio/resume website hosted entirely on 
 - **CI/CD:** GitHub Actions for automated build, linting and deployment
 
 ## Tech Used
-- **AWS Services:** S3, CloudFront, API Gateway, Lambda, DynamoDB, IAM
-- **CI/CD:** GitHub Actions
+- **AWS Services:** S3, CloudFront, API Gateway, Lambda, DynamoDB, IAM (For assume role in GitHub Actions)
+- **CI/CD:** GitHub Actions with OIDC
 - **Programming Languages:** JavaScript, Python
-- **Security & Monitoring:** IAM roles, CloudWatch, AWS Secrets Manager
+- **Security & Monitoring:** IAM roles, OIDC For AWS Credentials, CloudWatch, AWS Secrets Manager
 
 ## Features
 - **Hosting:** The portfolio is hosted on **AWS S3** and served via **CloudFront** for fast content delivery.
 - **Visitor Counter:** A **serverless backend** using **AWS Lambda/API Gateway/DynamoDB** tracks and displays visitor count.
 - **CI/CD Pipeline:** **GitHub Actions** automatically deploys changes to **S3** and invalidates the **CloudFront** cache.
-- **Security Best Practices:** IAM roles for least-privileged access, HTTPS enforcement via CloudFront, Private S3 Bucket.
+- **Security Best Practices:** IAM roles for least-privileged access, this includes in my GitHub Actions Workflow, not using AWS Access Key Or Secret Access Key, instead, assuming role with OIDC, HTTPS enforcement via CloudFront, Private S3 Bucket.
 
 
 ## Deployment
