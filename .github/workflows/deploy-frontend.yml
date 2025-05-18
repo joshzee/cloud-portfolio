@@ -27,17 +27,14 @@ jobs:
         with:
           version: 10
         
-      - name: CD to Frontend
-        run: cd frontend          
+          
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'pnpm'
-
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
+        run: cd frontend && pnpm install --frozen-lockfile
       - name: Build
         run: cd frontend && pnpm build
 
