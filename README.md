@@ -15,16 +15,17 @@ This project consists of a personal portfolio/resume website hosted entirely on 
 - **Security & Monitoring:** IAM roles, OIDC For AWS Credentials, CloudWatch, AWS Secrets Manager
  
 ## Features
-- **Hosting:** The portfolio is hosted on **AWS S3** and served via **CloudFront** for fast content delivery.
-- **Visitor Counter:** A **serverless backend** using **AWS Lambda/API Gateway/DynamoDB** tracks and displays visitor count.
-- **CI/CD Pipeline:** **GitHub Actions** automatically deploys changes to **S3** and invalidates the **CloudFront** cache.
-- **Security Best Practices:** IAM roles for least-privileged access, this includes in my GitHub Actions Workflow, not using AWS Access Key Or Secret Access Key, instead, assuming role with OIDC, HTTPS enforcement via CloudFront, Private S3 Bucket.
+- **Hosting:** The portfolio is hosted on **AWS S3** and served via **CloudFront** for fast content delivery
+- **Visitor Counter:** A **serverless backend** using **AWS Lambda/API Gateway/DynamoDB** tracks and displays visitor count
+- **CI/CD Pipeline:** **GitHub Actions** automatically deploys changes to **S3** and invalidates the **CloudFront** cache
+- **Security Best Practices:** IAM roles for least-privileged access, this includes in my GitHub Actions Workflow, not using AWS Access Key Or Secret Access Key, instead, assuming role with OIDC, HTTPS enforcement via CloudFront, Private S3 Bucket
+- **Terrafrom** for distaster recovery and quickly building and destroying infrastructure
 
 
 ## Deployment
 
 ### CI/CD via GitHub Actions
-- Push changes to the `main` branch to trigger the deployment workflow (`deploy-frontend.yml`).
+- Push to the `main` branch; trigger the deployment workflow (`deploy-frontend.yml`) only when `frontend` folder files are changed
 
 <img title="a title" alt="Alt text" src="ci-cd.png">
 
@@ -37,7 +38,7 @@ You can view the live version of my Cloud Portfolio here: [joshcod.es](https://j
 - **Security Best Practices**: IAM role configurations, Using Private S3 bucket served via CloudFront for HTTPS enforcement
 
 ## Things to Come
-- Terraform entire project
+- ~~Terraform entire project~~ (just needs backend module)
 - Add a contact form with SES email integration
 
 ## Acknowledgments
