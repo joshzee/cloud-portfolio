@@ -22,7 +22,7 @@ export default function Page() {
         AWS' wide range of services for Developers, Operations, QA Testers, Software & Support Engineers and many more. I started off 12+ years ago in ActionScript/Flash Development (RIP)
         and have worn many hats since then. I now find myself heavily involved in Enterprise and AI Technical Support, debugging code and Cloud infrastructure. I'm currently working mainly with DynamoDB,
         Cloudwatch, S3, API Gateway and Lambda, which combined, is a great serverless approach to solve the challenges that the organisation faces tackling
-        AI Hallucinations, Prompt Generation and more. When I'm not at work, I enjoy jigging around with my Homelab, Exercise Physiology, Keeping Fit, New Tech, Comics and playing with my Dog.`}
+        AI hallucinations, Prompt Generation and more. When I'm not at work, I enjoy jigging around with my Homelab, Exercise Physiology, Keeping Fit, New Tech, Comics and playing with my Dog.`}
 			</p>
 			<div className="my-8">
 				<ExperienceList />
