@@ -43,7 +43,7 @@ You can view the live version of my Cloud Portfolio here: [joshcod.es](https://j
 
 ## Acknowledgments
 - AWS documentation & the great AWS community for support
-
+!
 ---
 Thanks all!
 
