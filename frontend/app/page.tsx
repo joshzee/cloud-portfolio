@@ -1,4 +1,4 @@
-orkimport { BlogPosts } from "app/components/posts";
+import { BlogPosts } from "app/components/posts";
 import { ExperienceList } from "app/components/experience";
 import { ProjectList } from "app/components/projects";
 import ParticlesBackrgound from "app/components/ParticlesBackrgound";
