@@ -4,7 +4,7 @@ export function ProjectList() {
 		<div className="w-full space-x-0 md:space-x-2">
 			<h1 className="mb-7 text-2xl font-semibold tracking-tighter">Projects</h1>
 			<p className="text-neutral-900 dark:text-neutral-100 tracking-tight">
-				- To-Do (Sooner)
+				- To-Do
 			</p>
 		</div>
 	);
