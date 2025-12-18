@@ -15,7 +15,7 @@ export function DownloadFile() {
 		}
 
 		link.href = url;
-		link.download = "jz-resume.pdf"; // Any name you want to download the file as
+		link.download = "jz-resume.pdf";
 		link.click();
 		window.URL.revokeObjectURL(url);
 	};

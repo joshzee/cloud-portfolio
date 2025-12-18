@@ -24,9 +24,6 @@ export default function Page() {
         Google Cloud, Proprietary Network Mangement, API Gateways and more. When I'm not at work, I enjoy jigging around with my Homelab, Exercise Physiology, Keeping Fit, New Tech, Comics and playing with my Dog.`}
 			</p>
 			<div className="my-8">
-				<ExperienceList />
-			</div>
-			<div className="my-8">
 				<ProjectList />
 			</div>
 			<ParticlesBackrgound />
