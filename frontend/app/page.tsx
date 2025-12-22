@@ -18,10 +18,9 @@ export default function Page() {
 				Joshua Zarazovski
 			</h1>
 			<p className="mb-4">
-				{`I'm a Cloud enthusiast and AI advocate, finding unmatched effectiveness and efficiency in
-        AWS' wide range of services for Developers, Operations, QA Testers, Software & Support Engineers and many more. I started off 12+ years ago in ActionScript/Flash Development (RIP)
-        and have worn many hats since then. I now find myself heavily involved in Enterprised Network Technical Support @ Fastly, debugging code and Network infrastructure. I'm currently working mainly with Wireshark,
-        Google Cloud, Proprietary Network Mangement, API Gateways and more. When I'm not at work, I enjoy jigging around with my Homelab, Exercise Physiology, Keeping Fit, New Tech, Comics and playing with my Dog.`}
+				{`I’m a hands-on Technical Support Engineer transitioning toward DevOps, combining enterprise support experience at Fastly with active learning through KubeCraft’s real-world internship program. I troubleshoot complex networking and API issues daily using tools like Wireshark, Google Cloud, and proprietary network management platforms, while building skills across Linux, Docker/Kubernetes, GitLab/GitHub CI/CD, Terraform, monitoring, and IaC best practices.
+
+				I’m working toward certifications including AWS Solutions Architect and CKA, and developing a public portfolio through guided projects and mentoring from senior engineers. Outside of work, I stay curious—experimenting in my homelab, learning new tech, keeping fit, exploring exercise physiology, reading comics, and spending time with my dog. I bring operational experience, learning hunger, and a fresh, growth-focused mindset, and I’m actively pursuing opportunities to contribute and grow in DevOps/SRE platforms.`}
 			</p>
 			<div className="my-8">
 				<ProjectList />
