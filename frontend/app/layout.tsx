@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 		default: "Joshua Zarazovski",
 		template: "%s | Joshua Zarazovski",
 	},
-	description: "Melbourne based DevOps Intern, Developer, Cloud Enthusiast, and AI Advocate",
+	description: "Melbourne based DevOps Intern, Developer, Cloud Enthusiast, and Senior AI Support Engineer",
 	openGraph: {
 		title: "Joshua Zarazovski",
 		description: "Portfolio by Joshua Zarazovski.",
