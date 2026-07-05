@@ -1,6 +1,6 @@
 # Create a Hosted Zone
 resource "aws_route53_zone" "main" {
-    name = "joshcod.es"
+    name = "joshcodes.me"
 }
 
 # Region for ACM certificate
@@ -13,11 +13,11 @@ provider "aws" {
 # Request SSL Certificate
 resource "aws_acm_certificate" "ssl_cert" {
     provider = aws.ap-southeast-2
-    domain_name = "joshcod.es"
+    domain_name = "joshcodes.me"
     validation_method = "DNS"
 
     subject_alternative_names = [
-        "www.joshcod.es"
+        "www.joshcodes.me"
     ]
 }
 
@@ -48,7 +48,7 @@ resource "aws_acm_certificate_validation" "ssl_validation" {
 
 resource "aws_route53_record" "cf-a-record" {
     zone_id = aws_route53_zone.main.zone_id
-    name = "joshcod.es"
+    name = "joshcodes.me"
     type = "A"
 
     alias {
@@ -63,7 +63,7 @@ resource "aws_route53_record" "cf-a-record" {
 
 resource "aws_route53_record" "cf-aa-record" {
     zone_id = aws_route53_zone.main.zone_id
-    name = "www.joshcod.es"
+    name = "www.joshcodes.me"
     type = "A"
 
     alias {

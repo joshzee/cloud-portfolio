@@ -1,7 +1,7 @@
 
 # Create S3 bucket for the web objects
 resource "aws_s3_bucket" "web_object_bucket" {
-  bucket = "joshcod.es"
+  bucket = "joshcodes.me"
   tags = {
     Name        = "JoshCodes"
     Environment = "Production"
@@ -46,4 +46,3 @@ resource "aws_s3_bucket_policy" "web_object_bucket_policy" {
     ]
   })
 }
-

@@ -3,8 +3,6 @@ import type { Metadata } from "next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { Navbar } from "./components/nav";
-import { Analytics } from "@vercel/analytics/react";
-import { SpeedInsights } from "@vercel/speed-insights/next";
 import Footer from "./components/footer";
 import { baseUrl } from "./sitemap";
 
@@ -14,7 +12,7 @@ export const metadata: Metadata = {
 		default: "Joshua Zarazovski",
 		template: "%s | Joshua Zarazovski",
 	},
-	description: "Melbourne Web Developer, Cloud Enthusiast, and AI Advocate",
+	description: "Melbourne based DevOps Intern, Developer, Cloud Enthusiast, and AI Advocate",
 	openGraph: {
 		title: "Joshua Zarazovski",
 		description: "Portfolio by Joshua Zarazovski.",
@@ -57,8 +55,6 @@ export default function RootLayout({
 					<Navbar />
 					{children}
 					<Footer />
-					<Analytics />
-					<SpeedInsights />
 				</main>
 			</body>
 		</html>

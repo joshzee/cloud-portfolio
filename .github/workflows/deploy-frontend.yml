@@ -4,8 +4,9 @@ on:
   push:
     branches:
       - main
-    paths:      
+    paths:
       - 'frontend/**' # Trigger only for changes in the frontend directory
+  workflow_dispatch:
 
 permissions:
   id-token: write
@@ -18,28 +19,28 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
-   
       - name: Install pnpm
         uses: pnpm/action-setup@v6
         with:
           version: 10
-        
-          
+
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           cache-dependency-path: frontend/pnpm-lock.yaml
           node-version: 20
           cache: 'pnpm'
+
       - name: Install dependencies
-        run: cd frontend && pnpm install --no-frozen-lockfile
+        run: cd frontend && pnpm install --frozen-lockfile
+
       - name: Build
         run: cd frontend && pnpm build
 
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ap-southeast-2
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
@@ -47,7 +48,7 @@ jobs:
           role-session-name: DeployNextJSApp
 
       - name: Deploy to S3
-        run: aws s3 sync frontend/./out s3://joshcod.es
+        run: aws s3 sync frontend/out s3://joshcod.es
 
       - name: Invalidate CloudFront Cache
         run: aws cloudfront create-invalidation --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"

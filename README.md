@@ -30,7 +30,7 @@ This project consists of a personal portfolio/resume website hosted entirely on 
 <img title="a title" alt="Alt text" src="ci-cd.png">
 
 ## Live Demo
-You can view the live version of my Cloud Portfolio here: [joshcod.es](https://joshcod.es) (still in content/design work, currently used more for Full Cloud infrastructure and CI/CD purposes).
+You can view the live version of my Cloud Portfolio here: [joshcodes.me](https://joshcodes.me) (still in content/design work, currently used more for Full Cloud infrastructure and CI/CD purposes).
 
 ## Lessons Learned
 - **Serverless Architectures**: Implementing API Gateway/Lambda/DynamoDB
@@ -46,4 +46,3 @@ You can view the live version of my Cloud Portfolio here: [joshcod.es](https://j
 !
 ---
 Thanks all!
-

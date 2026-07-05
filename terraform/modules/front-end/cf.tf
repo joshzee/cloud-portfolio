@@ -39,7 +39,7 @@ resource "aws_cloudfront_distribution" "s3_distribution" {
 
     price_class = "PriceClass_All"
 
-    aliases = [ "joshcod.es", "www.joshcod.es" ]
+    aliases = [ "joshcodes.me", "www.joshcodes.me" ]
 
     viewer_certificate {
       acm_certificate_arn = aws_acm_certificate.ssl_cert.arn
