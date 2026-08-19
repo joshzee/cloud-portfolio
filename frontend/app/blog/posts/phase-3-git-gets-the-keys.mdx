@@ -1,0 +1,94 @@
+---
+title: "HL Phase 3: Git Gets the Keys"
+summary: "Bootstrapping Flux into my K3s homelab and turning a GitHub repository into the declared source of cluster state."
+publishedAt: "2026-01-07"
+slug: "HL-phase-3-git-gets-the-keys"
+tags:
+  - homelab
+  - kubernetes
+  - k3s
+  - gitops
+  - flux
+  - github
+---
+
+Until now, changing my cluster meant connecting to it and running a command. That is fine for proving the cluster works, but it leaves the most important question unanswered: what is the cluster *supposed* to look like?
+
+For the next phase, that answer will live in Git.
+
+## Why Flux?
+
+The two names I encountered most often when reading about Kubernetes GitOps were [Flux](https://fluxcd.io/) and [Argo CD](https://argo-cd.readthedocs.io/). Both continuously compare a declared state with the state of a cluster, but they present that workflow differently.
+
+Argo CD provides a prominent web interface as well as a CLI. Flux is more CLI- and Kubernetes-API-first and does not ship with an equivalent central dashboard. The course deliberately uses Flux so that I work directly with Git, manifests and reconciliation rather than learning the workflow mainly through a UI.
+
+That does not make Flux universally better, or Argo CD something I can ignore. It simply makes Flux a useful first implementation of GitOps because fewer details are hidden from me.
+
+There is also some practical relevance to the mentor's Azure-focused work. Microsoft provides [Flux v2 as the `microsoft.flux` cluster extension](https://learn.microsoft.com/en-us/azure/azure-arc/kubernetes/conceptual-gitops-flux2) for both Azure Kubernetes Service and Azure Arc-enabled Kubernetes. Flux is not restricted to Azure—and Azure can also run Argo CD—but it has a clear first-party integration path there.
+
+## Preparing the repository
+
+I created a personal GitHub repository named `zbook-cluster`. My local Git installation initially created its branch as `master`, so I renamed it before bootstrapping Flux and changed the default for future repositories:
+
+```bash
+git branch -m main
+git config --global init.defaultBranch main
+```
+
+The repository will hold declarative cluster configuration rather than a copy of the cluster itself. Kubeconfigs, private keys, cluster tokens and unencrypted secrets do not belong in it.
+
+## Bootstrapping Flux
+
+With the Flux CLI installed on my MacBook and its kubeconfig pointing to the K3s API on the ZBook, I ran:
+
+```bash
+flux bootstrap github \
+  --owner=$GITHUB_USER \
+  --repository=zbook-cluster \
+  --branch=main \
+  --path=./clusters/staging \
+  --personal
+```
+
+The options make the intended relationship explicit:
+
+- `--owner` selects my GitHub account without hard-coding it into the command.
+- `--repository` identifies the repository that will hold the cluster state.
+- `--branch=main` tells Flux which branch to reconcile.
+- `--path=./clusters/staging` gives this cluster its own configuration path.
+- `--personal` identifies the owner as a personal account rather than an organisation.
+
+The command did considerably more than install a local CLI. It committed the Flux manifests to GitHub, installed the Flux components into the cluster, configured repository access and created the objects that tell Flux to reconcile the selected repository path.
+
+The bootstrap completed with four controller deployments ready:
+
+```text
+✔ source-controller: deployment ready
+✔ kustomize-controller: deployment ready
+✔ helm-controller: deployment ready
+✔ notification-controller: deployment ready
+```
+
+Each has a focused responsibility. The Source Controller retrieves declared configuration. The Kustomize Controller builds and applies Kubernetes resources. The Helm Controller manages declarative Helm releases. The Notification Controller handles events and integrations.
+
+## Two Helm controllers, one important boundary
+
+The `helm-controller` line initially looked familiar because K3s already includes something with almost the same name. They are not the same component.
+
+K3s's controller reconciles `HelmChart` resources from the `helm.cattle.io` API group and currently manages the packaged Traefik installation in my cluster. [Flux's controller](https://fluxcd.io/flux/components/helm/helmreleases/) runs as a deployment in `flux-system` and reconciles `HelmRelease` resources from `helm.toolkit.fluxcd.io`.
+
+They can coexist because they watch different APIs. I still need to maintain a clear ownership boundary: K3s owns its packaged components, while Flux will own Helm releases declared through my GitOps repository. Having two reconcilers attempt to manage the same release would replace clarity with a particularly unhelpful tug-of-war.
+
+## GitOps is installed, but not yet proven
+
+The controllers are running and the repository connection exists, but I have not yet demonstrated the most interesting part: changing a workload in Git and watching Flux reconcile the cluster without an imperative deployment command.
+
+For now, the checkpoint is straightforward:
+
+- The `zbook-cluster` repository uses `main`.
+- Flux watches `clusters/staging`.
+- The default Flux controllers are running in the K3s cluster.
+- Git now contains the machinery that keeps the GitOps installation in place.
+- No application workload has been handed over to Flux yet.
+
+The next step is to commit a real desired state and watch the cluster move towards it. Git has the keys; now it needs somewhere to drive.

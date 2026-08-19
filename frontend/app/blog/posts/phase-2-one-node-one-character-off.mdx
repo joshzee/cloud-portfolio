@@ -1,0 +1,141 @@
+---
+title: "HL Phase 2: One Node, One Character Off"
+summary: "Installing K3s on the ZBook, investigating two deceptively similar Helm flags and securely managing the cluster from my MacBook."
+publishedAt: "2025-12-29"
+slug: "phase-2-one-node-one-character-off"
+tags:
+  - homelab
+  - kubernetes
+  - k3s
+  - kubectl
+  - helm
+---
+
+The ZBook was now a reachable Ubuntu server, but it was not yet a cluster. The next step was installing [K3s](https://docs.k3s.io/), the Kubernetes distribution that will underpin the rest of the homelab.
+
+K3s is a lightweight, fully conformant Kubernetes distribution. It packages the control-plane components, container runtime, networking and several supporting services into a comparatively simple installation. That makes it well suited to a physical lab that will eventually contain a mixture of conventional computers and Raspberry Pis.
+
+## Installing K3s
+
+I entered a root login shell and ran the official installation script using the command from the course:
+
+```bash
+sudo -i
+curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable=helm-controller" sh -
+```
+
+The absence of a `K3S_URL` tells the installer to configure this machine as a K3s **server**. That makes the ZBook my initial control-plane node and datastore host.
+
+A K3s server can also run workloads by default. Later, I will add a Raspberry Pi 5 as a dedicated K3s agent—or worker node—but the ZBook is already a functional single-node cluster on its own.
+
+## The one-character difference that changed the result
+
+The course command included `--disable=helm-controller`, which I initially interpreted as disabling K3s's native Helm Controller. My first installation used what appeared to be the equivalent dedicated flag:
+
+```text
+--disable-helm-controller
+```
+
+That cluster started with three visible system pods: CoreDNS, Metrics Server and the Local Path Provisioner. The mentor's cluster had two additional pods:
+
+```text
+helm-install-traefik-crd-*
+helm-install-traefik-*
+```
+
+My first suspicion was the obvious hardware difference—his server was a Raspberry Pi and mine was an Intel ZBook—but those pods had nothing to do with CPU architecture. They were Helm jobs installing K3s's packaged Traefik ingress controller.
+
+The actual difference was a single character:
+
+```text
+--disable=helm-controller   # --disable with "helm-controller" as its value
+--disable-helm-controller   # the dedicated Helm Controller switch
+```
+
+K3s treats `--disable=<name>` as a request to disable a packaged AddOn such as `traefik`, `coredns` or `metrics-server`. `helm-controller` is not one of those AddOn names. The dedicated `--disable-helm-controller` flag is what stops the controller itself.
+
+I had therefore disabled the controller more completely than the course environment. To keep the rest of the lab reproducible, I reran the installer with the course command and confirmed that my pod output now matched the mentor's environment, including the Traefik installation jobs.
+
+The useful lesson was not merely which spelling to use. Comparing the expected and actual cluster state exposed what each flag really controlled—and reinforced that a successful command is not the same thing as a verified outcome.
+
+## The first health check
+
+Once the installation completed, I checked that the node had registered successfully:
+
+```bash
+kubectl get nodes
+```
+
+I also inspected the system workloads across every namespace:
+
+```bash
+kubectl get pods --all-namespaces
+```
+
+K3s stores its administrative kubeconfig at:
+
+```text
+/etc/rancher/k3s/k3s.yaml
+```
+
+That file is root-readable by default because it contains unrestricted cluster-administrator credentials. For the initial setup, I ran the administrative commands from the root shell rather than weakening those permissions.
+
+## Managing the cluster from my MacBook
+
+Running `kubectl` directly on the server was useful for the first check, but I wanted to administer the cluster from the MacBook I use every day.
+
+In this relationship, the MacBook is the Kubernetes **client**, or administrative workstation. The ZBook is the **server**: it hosts the K3s control plane and exposes the Kubernetes API.
+
+The generated kubeconfig belongs to `root`, so I first made a temporary copy that my regular `joshz` account could transfer. I changed only the ownership of that copy and kept its permissions restrictive:
+
+```bash
+sudo cp /etc/rancher/k3s/k3s.yaml /home/joshz/k3s.yaml
+sudo chown joshz:joshz /home/joshz/k3s.yaml
+sudo chmod 600 /home/joshz/k3s.yaml
+```
+
+From the MacBook, I then used my existing `zbook` SSH alias to copy the file directly into the default location used by `kubectl`:
+
+```bash
+mkdir -p ~/.kube
+scp zbook:~/k3s.yaml ~/.kube/config
+chmod 600 ~/.kube/config
+```
+
+Mode `600` does not make the file read-only: its owner can still read and edit it. It prevents group members and other local users from reading the cluster credentials.
+
+The generated configuration initially points to the API server at `127.0.0.1`. That address works when `kubectl` is running on the ZBook itself, but from the MacBook it would refer back to the MacBook.
+
+I therefore changed the `server` entry in `~/.kube/config` to the ZBook's private LAN address while leaving the port at K3s's default of `6443`:
+
+```yaml
+server: https://192.168.x.x:6443
+```
+
+That `server` value tells `kubectl` where to send its HTTPS requests. SSH is no longer involved once the file has been transferred: `kubectl` connects directly to the Kubernetes API on port `6443`.
+
+There is no password prompt because the kubeconfig already contains the material needed for mutual TLS authentication:
+
+- `certificate-authority-data` lets the MacBook verify that it reached the correct K3s API server.
+- `client-certificate-data` identifies the client to Kubernetes.
+- `client-key-data` proves that the client owns that certificate and is effectively the sensitive credential.
+
+The long values are Base64-encoded so the certificates and key can be embedded in one portable YAML file. Base64 is an encoding, not encryption, so anyone who obtains this kubeconfig obtains its access rights as well.
+
+With that change, I could verify the cluster over the network from the MacBook:
+
+```bash
+kubectl get nodes
+kubectl get pods --all-namespaces
+```
+
+The K3s-generated kubeconfig grants full administrative access to the cluster, so it stays permission-restricted and out of source control. I also avoid publishing the real private IP or any embedded certificate and key data. Any temporary transfer copy on the ZBook can be removed once it is no longer needed. Because the MacBook file is a copy, I will need to replace it if K3s later refreshes the embedded certificates in the original configuration.
+
+At this point, the lab had gained:
+
+- A functioning single-node K3s cluster
+- The ZBook acting as both control plane and initial worker
+- Remote `kubectl` access from my MacBook
+- K3s's Helm Controller active, with packaged Traefik installed through Helm
+
+It still looked like a laptop, a cable and a terminal, but it now behaved like a Kubernetes cluster. The next phase would move its desired state into Git and introduce Flux as the reconciler.

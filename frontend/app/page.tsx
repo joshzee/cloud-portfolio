@@ -18,26 +18,18 @@ export default function Page() {
 				Joshua Zarazovski
 			</h1>
 			<p className="mb-4">
-			I am a hands-on <b>Senior Application Support Engineer</b> actively transitioning into a <b>DevOps/SRE</b> career path. 
-			Currently, I combine my enterprise-scale support experience at <b>LivePerson</b> with practical, hands-on engineering through KubeCraft’s real-world internship program.
+			I’m a Senior Application Support Engineer at LivePerson, transitioning into DevOps/SRE. I troubleshoot high-priority platform issues across APIs and conversational automation, using Elastic, Google Cloud, Grafana, Postman, Chrome DevTools and Proxyman to trace failures, reproduce defects and support enterprise incidents.
 			</p>
 
 			<p className="mb-4">
-			In my daily operations at LivePerson, I deep-dive into complex technical challenges to troubleshoot and resolve high-priority platform issues. My core responsibilities include leveraging our extensive library of APIs, analyzing conversational bots, and recreating code-level bugs. 
-			I rely on a robust observability and diagnostic toolkit daily, utilizing <b>Elastic</b> and <b>Google Cloud</b> for log analysis, <b>Grafana</b> for monitoring, and <b>Postman</b> for API testing. 
-			I also run network diagnostics using <b>Chrome DevTools &amp; Proxyman</b>, while managing enterprise incident workflows and configuration deployments through <b>proprietary internal automation consoles</b>, serverless FaaS platforms, and <b>enterprise CRM platforms</b>
+			Alongside my role, I’m participating in KubeCraft’s hands-on DevOps internship program, completing mentored labs and portfolio projects across Linux, Docker, Kubernetes, Flux and GitOps, CI/CD, Terraform and Infrastructure as Code. I’m also preparing for the AWS Solutions Architect and Certified Kubernetes Administrator certifications. The posts below document what I build, what breaks and how I work through it.
 			</p>
 
 			<p className="mb-4">
-			Driven by a passion for automation, I dedicate my off-hours to building out my homelab, where I gain practical experience with <b>Linux, Docker, Kubernetes, GitLab/GitHub CI/CD, Terraform,</b> and <b>Infrastructure as Code (IaC)</b> best practices. 
-			I am actively working toward my <b>AWS Certified Solutions Architect</b> and <b>Certified Kubernetes Administrator (CKA)</b> credentials while developing a public portfolio of projects under the guidance of senior mentors.
+			Away from terminals, I’m usually training, reading about exercise physiology, catching up on comics or spending time with my partner and elderly dog. I’m looking for a collaborative DevOps or SRE team where I can contribute strong operational judgement while continuing to grow as an engineer.
 			</p>
 
-			<p className="mb-4">
-			Outside of work, my curiosity keeps me exploring. You can usually find me experimenting with new configurations in my homelab, diving into exercise physiology, 
-			keeping fit, reading comics, or hanging out with my beautiful partner and old man dog. I bring a strong foundation in enterprise operations, a proven hunger for continuous learning, 
-			and a growth-focused mindset, and I am actively seeking opportunities to contribute to and scale with a collaborative DevOps or SRE team.
-			</p>
+
 
 			<div className="my-8">
 				<ProjectList />

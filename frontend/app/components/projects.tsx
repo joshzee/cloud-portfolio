@@ -189,6 +189,8 @@ export function ProjectList() {
 					}
 					websiteUrl="https://joshcodes.me"
 					githubUrl="https://github.com/joshzee/cloud-portfolio"
+					imageSrc="/cloud-portfolio-flow.png"
+					imageAlt="Cloud Portfolio Flow"
 				/>
 
 				{/* Copy this block for each new project.

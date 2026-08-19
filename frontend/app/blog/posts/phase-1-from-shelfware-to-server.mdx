@@ -1,0 +1,69 @@
+---
+title: "Homelab Phase 1: From Shelfware to Server"
+summary: "Giving an unused HP ZBook a second life as the physical Ubuntu Server at the centre of my Kubernetes homelab."
+publishedAt: "2025-12-11"
+slug: "homelab-phase-1-from-shelfware-to-server"
+tags:
+  - homelab
+  - ubuntu-server
+  - linux
+  - ssh
+---
+
+My first homelab instinct was predictable: *I need to buy a Raspberry Pi.*
+
+Then I remembered the HP ZBook Studio G8 sitting unused nearby. It has an Intel processor, plenty of memory and considerably more power than I need for an initial Kubernetes control plane. Buying another computer before using the one I already owned seemed backwards.
+
+So the ZBook got a new job.
+
+## Starting clean with Ubuntu Server
+
+I downloaded the Ubuntu Server image, wrote it to a bootable USB drive and installed it directly onto the ZBook's internal storage—no virtual machines and no desktop environment.
+
+During the installation, I created my regular user account and gave the machine the hostname:
+
+```text
+lab-node-01
+```
+
+That name is intentionally functional. This machine will become the first node in the lab rather than remaining "that old laptop under the desk."
+
+I enabled the OpenSSH server and connected the ZBook to the network over Ethernet. Kubernetes can run over Wi-Fi, but a wired connection removes an unnecessary source of latency and instability from the lab.
+
+## Making remote access frictionless
+
+I didn't want to remember an IP address or type a full username and hostname every time I connected.
+
+From my everyday computer, I copied my existing SSH public key to the server:
+
+```bash
+ssh-copy-id joshz@192.168.x.x
+```
+
+I then created an entry in my local SSH configuration:
+
+```sshconfig
+Host zbook
+    HostName 192.168.x.x
+    User joshz
+    IdentityFile ~/.ssh/id_ed25519
+```
+
+That reduced the entire connection process to:
+
+```bash
+ssh zbook
+```
+
+It is a small improvement, but homelab tasks quickly become repetitive. Removing little points of friction makes it far more likely that I will actually use and maintain the environment.
+
+At this point, the first layer of the lab was complete:
+
+- A physical HP ZBook Studio G8 running Ubuntu Server
+- A wired network connection
+- A stable hostname
+- Key-based SSH access through the `zbook` alias
+
+There was no Kubernetes cluster yet, and that was deliberate. Before adding an orchestration layer, I wanted the machine beneath it to be predictable, reachable and easy to administer.
+
+The next phase would turn this repurposed laptop into a single-node K3s cluster—and reveal how much difference one character in a command can make.
