@@ -1,0 +1,184 @@
+---
+title: "Homelab Phase 4: Commit, Push, Reconcile"
+summary: "Deploying Linkding to my K3s homelab through Flux, Kustomize and Git—without reaching for kubectl apply."
+publishedAt: "2026-08-20"
+slug: "phase-4-commit-push-reconcile"
+tags:
+  - homelab
+  - kubernetes
+  - gitops
+  - flux
+  - kustomize
+  - linkding
+---
+
+Installing Flux gave my cluster a GitOps controller. It did not yet prove I had a GitOps workflow.
+
+That required a commit in Git to produce something real inside Kubernetes. For the first workload, I deployed [Linkding](https://github.com/sissbruecker/linkding), a self-hosted bookmark manager, into its own namespace.
+
+The rule for this exercise was simple: define the desired state, push it to Git and let Flux perform the deployment. No `kubectl apply`.
+
+## Following the source
+
+Flux's bootstrap process had already committed `gotk-sync.yaml` under `clusters/staging/flux-system`. Among other resources, that file defines a Flux `GitRepository` pointing at my `zbook-cluster` repository.
+
+`GitRepository` is not a built-in Kubernetes resource. Flux installs the Custom Resource Definition and runs a controller that knows how to reconcile it. I could inspect the resulting object with:
+
+```bash
+kubectl -n flux-system get gitrepositories.source.toolkit.fluxcd.io
+```
+
+```text
+NAME          URL                                        READY   STATUS
+flux-system   ssh://git@github.com/joshzee/zbook-cluster True    stored artifact for revision 'main@sha1:44b008d2...'
+```
+
+That status meant the Source Controller had fetched the repository and stored an artifact for the displayed commit. The cluster had a source; the next step was giving it an application structure to follow.
+
+## Giving the repository a shape
+
+I followed Flux's [monorepo structure guidance](https://fluxcd.io/flux/guides/repository-structure/), separating reusable application definitions from environment-specific configuration:
+
+```text
+.
+├── apps
+│   ├── base
+│   │   └── linkding
+│   │       ├── deployment.yaml
+│   │       ├── kustomization.yaml
+│   │       └── namespace.yaml
+│   └── staging
+│       └── linkding
+│           └── kustomization.yaml
+└── clusters
+    └── staging
+        ├── apps.yaml
+        └── flux-system
+            ├── gotk-components.yaml
+            ├── gotk-sync.yaml
+            └── kustomization.yaml
+```
+
+The separation gives each layer a clear responsibility:
+
+- `clusters/staging` is the entry point already watched by the bootstrap configuration.
+- `clusters/staging/apps.yaml` defines a Flux `Kustomization` that points at `apps/staging`.
+- `apps/staging/linkding` selects the reusable Linkding base and applies it to the staging environment.
+- `apps/base/linkding` contains the ordinary Kubernetes resources shared by any future environment.
+
+The local kubeconfig used by my workstation does not belong in this structure. It remains ignored by Git because it contains cluster-administrator credentials.
+
+## Two kinds named Kustomization
+
+This setup exposed an initially confusing naming collision.
+
+The resource in `apps.yaml` is a **Flux Kustomization**, from the `kustomize.toolkit.fluxcd.io` API group. It tells a Flux controller which repository path to build and how often to reconcile it. In my staging configuration, the interval is one minute:
+
+```yaml
+spec:
+  interval: 1m0s
+```
+
+The files named `kustomization.yaml` inside the application directories are **Kustomize configurations**, using `kustomize.config.k8s.io/v1beta1`. They compose and customise Kubernetes YAML.
+
+The base configuration maps the two resources needed for this first deployment:
+
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - namespace.yaml
+```
+
+`namespace.yaml` creates the dedicated `linkding` namespace. `deployment.yaml` requests one replica of the Linkding container and exposes its application port inside the pod:
+
+```yaml
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: linkding
+          image: sissbruecker/linkding:1.31.0
+          ports:
+            - containerPort: 9090
+```
+
+This is intentionally a minimal first deployment. It does not yet include persistent storage, hardened security configuration or public ingress.
+
+## The deployment command was a Git push
+
+With the desired state written, I committed it using a Conventional Commits-style message and pushed it to `main`:
+
+```bash
+git add .
+git commit -m "feat: deploy linkding"
+git push origin main
+```
+
+Using `git add .` assumes sensitive local files are already ignored. Before publishing a GitOps repository, `git ls-files kubeconfig` should return no output.
+
+Immediately after the push, Flux was still reporting the previous revision:
+
+```text
+NAME          REVISION            READY   MESSAGE
+flux-system   main@sha1:44b008d2  True    Applied revision: main@sha1:44b008d2
+```
+
+That was expected. Reconciliation is asynchronous: the Source Controller first needs to observe and publish the new Git artifact, then the Kustomizations react to that revision. With one-minute intervals configured in this lab, the old revision briefly remained visible. Shortly afterwards, both Kustomizations reported the new commit:
+
+```text
+NAME          REVISION            READY   MESSAGE
+apps          main@sha1:a9e88d65  True    Applied revision: main@sha1:a9e88d65
+flux-system   main@sha1:a9e88d65  True    Applied revision: main@sha1:a9e88d65
+```
+
+The chain had completed: the bootstrap Kustomization reconciled `clusters/staging`, `apps.yaml` created the application-level reconciliation, and the `apps` Kustomization built and applied the staging manifests.
+
+## Verifying what Git created
+
+Git was the deployment interface, but `kubectl` remained useful for observation. First, I checked the namespaces:
+
+```bash
+kubectl get namespaces
+```
+
+```text
+NAME          STATUS
+default       Active
+flux-system   Active
+kube-system   Active
+linkding      Active
+```
+
+Then I checked the workload:
+
+```bash
+kubectl get pods -n linkding
+```
+
+```text
+NAME                        READY   STATUS    RESTARTS
+linkding-678cf4b484-kmtxf   1/1     Running   0
+```
+
+The distinction matters: GitOps did not eliminate the Kubernetes CLI. It removed the need to use the CLI for routine, imperative mutation. I used `kubectl` to inspect the result, not to create it.
+
+To reach the application locally, I forwarded port `8080` on my MacBook to port `9090` in the deployment:
+
+```bash
+kubectl -n linkding port-forward deployment/linkding 8080:9090
+```
+
+Opening `http://localhost:8080` presented the Linkding login page. The first application was alive, and its arrival in the cluster could be traced to a specific Git commit.
+
+At this checkpoint:
+
+- Flux is reconciling both the cluster entry point and the staging applications path.
+- Linkding has its own namespace and a running pod.
+- The deployment is declared in Git and reproducible from the repository.
+- `kubectl apply` played no part in the deployment.
+- Linkding is still temporary, locally accessible and not yet hardened.
+
+The next phases will give it persistent storage, improve its security and expose it beyond a port-forward. GitOps has delivered the application; now the application needs to survive real use.

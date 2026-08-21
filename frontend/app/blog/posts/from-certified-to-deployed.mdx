@@ -1,0 +1,105 @@
+---
+title: "From Certified to Deployed"
+publishedAt: "2025-05-23"
+summary: "Building a serverless AWS portfolio and a GitHub Actions pipeline that deploys it without long-lived cloud credentials."
+---
+
+Three days after writing about passing the AWS Certified Cloud Practitioner exam, I was ready to document something more useful than another practice score: a system running in AWS that I had designed, connected and deployed myself.
+
+The [Cloud Resume Challenge](https://cloudresumechallenge.dev/docs/the-challenge/aws/) provided the outline. My version became [joshcodes.me](https://joshcodes.me): a Next.js portfolio with a serverless visitor counter and an automated route from a Git push to production.
+
+The certificate had tested whether I understood the services. This project tested whether I could make them cooperate.
+
+## More than a résumé in a bucket
+
+The frontend is built with Next.js and exported as static files. Those files live in a private S3 bucket, with CloudFront acting as the public entry point. Route 53 handles the domain, while CloudFront serves the site over HTTPS and keeps the bucket away from direct public access.
+
+![Cloud portfolio architecture showing the AWS services and deployment flow](/cloud-portfolio-flow.png)
+
+That covers the static site, but the challenge also calls for something dynamic: a visitor counter. When the page loads, the frontend sends a request through API Gateway. A Lambda function handles the request and updates the count stored in DynamoDB before returning the result.
+
+The finished request path is:
+
+```text
+Browser -> API Gateway -> Lambda -> DynamoDB
+```
+
+It is a deliberately small feature, but it forced the frontend, API, compute and database layers to cross service boundaries. The counter itself was not the difficult part. IAM permissions, request handling and making the response usable by a browser were where the useful work happened.
+
+## Removing permanent AWS keys from the pipeline
+
+Deploying the site manually would have met the hosting requirement, but it would also have left every future update dependent on me remembering a sequence of commands. I wanted the repository to own that process.
+
+The GitHub Actions workflow runs when changes under `frontend/` reach the `main` branch. It checks out the repository, installs the dependencies, builds the static Next.js export, synchronises the generated files to S3 and invalidates the CloudFront cache.
+
+```yaml
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "frontend/**"
+```
+
+Restricting the workflow by path means a documentation-only or unrelated repository change does not redeploy the site.
+
+The more important decision was how GitHub authenticated with AWS. I initially needed to prove that the workflow could assume the correct identity, so I reduced the problem to one command:
+
+```bash
+aws sts get-caller-identity
+```
+
+Once that worked, the deployment workflow could use GitHub's OpenID Connect provider to assume an IAM role. No AWS access key or secret access key needed to be stored in GitHub.
+
+```yaml
+permissions:
+  id-token: write
+  contents: read
+
+- name: Configure AWS credentials
+  uses: aws-actions/configure-aws-credentials@v4
+  with:
+    aws-region: ap-southeast-2
+    role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+    role-duration-seconds: 900
+```
+
+GitHub receives temporary credentials for the job, uses them to perform the deployment and loses them when the session expires. That is both safer and easier to maintain than rotating a long-lived access-key pair.
+
+## Push, build, publish
+
+With authentication in place, the last two stages are intentionally uneventful:
+
+```bash
+aws s3 sync frontend/out s3://joshcod.es
+aws cloudfront create-invalidation \
+  --distribution-id "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}" \
+  --paths "/*"
+```
+
+The S3 sync publishes the new static build. The invalidation prevents CloudFront from continuing to serve an older cached version after the deployment completes.
+
+The resulting delivery path is now:
+
+```text
+Push to main
+    -> GitHub Actions builds the Next.js site
+    -> GitHub assumes a short-lived AWS role
+    -> Static output is synchronised to S3
+    -> CloudFront cache is invalidated
+    -> The updated site is live
+```
+
+There were several workflow revisions before that sequence worked cleanly. That was the point of the project. The useful lesson was not that a YAML file can run shell commands; it was learning how GitHub's identity, an IAM trust policy, a private S3 origin and CloudFront's cache all affect the same deployment.
+
+The complete project is available in the [cloud-portfolio repository](https://github.com/joshzee/cloud-portfolio).
+
+## It's… beautiful
+
+The first successful end-to-end run did not need a lengthy announcement. The build completed, the files reached S3, CloudFront received its invalidation and the production site changed without a manual deployment.
+
+At that moment, a green GitHub Actions workflow was close enough to a sunset over the ocean.
+
+![A successful GitHub Actions workflow](https://i.imgur.com/shRiLp5.gif)
+
+The certification gave me the vocabulary. The Cloud Resume Challenge gave me a working system—and several better questions about how to improve it.

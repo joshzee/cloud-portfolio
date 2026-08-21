@@ -1,0 +1,33 @@
+---
+title: 'Certified, but Not Yet Deployed'
+publishedAt: '2025-05-20'
+summary: 'Passing AWS Cloud Practitioner validated the theory. The Cloud Resume Challenge would test whether I could turn it into a working system.'
+---
+
+On 20 May 2025, I passed the AWS Certified Cloud Practitioner (CLF-C02) exam—my first formal cloud certification.
+
+A certificate is a useful checkpoint. It is not a deployment.
+
+The exam gave some structure to knowledge I had accumulated less formally over more than 12 years in technical roles. AWS was not new territory: I already worked with systems built around DynamoDB, S3, CloudWatch and Lambda. Those services had been in place before I arrived, but supporting them meant learning how data moved through the architecture, why functions were invoked and where to look when the expected flow broke.
+
+I had also migrated a WordPress Multisite installation to AWS and administered a collection of EC2 instances, balancing reliability against the recurring reminder that idle infrastructure still sends invoices.
+
+That experience taught me how to operate and troubleshoot existing systems. What I had not yet done was own a cloud project from beginning to end: design it, deploy it, secure it, automate it and then diagnose whatever survived the planning stage.
+
+## From services to a system
+
+That gap is what made the [AWS Cloud Resume Challenge](https://cloudresumechallenge.dev/docs/the-challenge/aws/) interesting.
+
+The project goes well beyond uploading a résumé to a bucket. It brings together a static frontend served through S3 and CloudFront, DNS and TLS, a JavaScript visitor counter, an API backed by Lambda and DynamoDB, automated tests, Infrastructure as Code and CI/CD through GitHub Actions.
+
+None of those pieces is especially mysterious in isolation. The useful engineering work happens at their boundaries: permissions, data flow, deployment order, configuration and the small assumptions that only become visible when two services refuse to cooperate.
+
+The certification tested whether I understood the building blocks. The challenge would test whether I could make them agree with one another.
+
+## Turning knowledge into evidence
+
+My next objective is therefore not just another badge. It is a working, publicly accessible system with its infrastructure and deployment process captured in code.
+
+I will use this blog to document that process honestly: the design choices, the useful mistakes and the point where a tidy architecture diagram meets an error message. The same applies to the homelab, Python projects and whatever else fits into the category of *can I build this properly around a full-time job?*
+
+Passing CLF-C02 was just the starting signal.
