@@ -1,0 +1,310 @@
+---
+title: "Phase 5: Keep the Data, Lose the Root"
+summary: "Using Flux, K3s local-path storage and Kubernetes security contexts to make Linkding survive pod replacement without leaving its container running as root."
+publishedAt: "2026-08-23"
+slug: "phase-5-keep-the-data-lose-the-root"
+tags:
+  - homelab
+  - kubernetes
+  - k3s
+  - gitops
+  - flux
+  - storage
+  - security
+  - linkding
+---
+
+My first GitOps deployment of Linkding worked, but it had two undesirable properties: replacing its pod erased its memory, and Kubernetes was not enforcing a non-root runtime identity—opening a shell placed me inside the container as root.
+
+Neither is a great characteristic for an application I eventually intend to expose beyond my own network.
+
+This phase gave Linkding persistent storage, proved that the data survived a pod replacement and then reduced the privileges of the process using that data. The order matters. Persistence made the application useful; security made the next step less reckless.
+
+## Declaring storage in Git
+
+Until now, Linkding's state lived in the container filesystem. A pod is replaceable by design, so anything stored only inside it should be treated the same way.
+
+Before changing the manifests, I installed the Homebrew `kubectx` bundle, which includes both `kubectx` and `kubens`:
+
+```bash
+brew install kubectx
+```
+
+`kubens linkding` is convenient when working repeatedly in one namespace. I still use explicit `-n linkding` flags below so that each published command remains self-contained.
+
+I added a third resource to `apps/base/linkding`: a PersistentVolumeClaim named `linkding-data-pvc`.
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: linkding-data-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+```
+
+The PVC asks the cluster for one gibibyte of filesystem storage that can be mounted read-write by one node. `ReadWriteOnce` does not mean that Kubernetes stores the data inside the pod, nor does it guarantee access by only one pod. It describes how the resulting volume may be mounted across nodes.
+
+I then added `storage.yaml` to the base Kustomize configuration:
+
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - namespace.yaml
+  - storage.yaml
+```
+
+Finally, the Deployment's pod template had to consume the claim. The volume references the PVC, while the container mounts that volume at Linkding's data directory:
+
+```yaml
+containers:
+  - name: linkding
+    image: sissbruecker/linkding:1.46.2
+    ports:
+      - containerPort: 9090
+    volumeMounts:
+      - name: linkding-data
+        mountPath: /etc/linkding/data
+volumes:
+  - name: linkding-data
+    persistentVolumeClaim:
+      claimName: linkding-data-pvc
+```
+
+Because YAML regards whitespace as syntax rather than a suggestion, I also made Vim expand tabs into two spaces and highlight trailing whitespace:
+
+```vim
+set tabstop=2
+set softtabstop=2
+set shiftwidth=2
+set expandtab
+autocmd BufRead,BufNewFile * match Error /\s\+$/
+```
+
+The changes followed the same delivery path as the first deployment: commit, push and let Flux reconcile the desired state. No `kubectl apply` was needed.
+
+## A claim, a volume and one physical node
+
+K3s [includes Rancher's Local Path Provisioner](https://docs.k3s.io/add-ons/storage) and exposes `local-path` as the default StorageClass. Because I did not specify a class in the claim, K3s used that default and dynamically created a PersistentVolume on the ZBook.
+
+```bash
+kubectl get pvc -n linkding
+```
+
+```text
+NAME                STATUS   CAPACITY   ACCESS MODES   STORAGECLASS
+linkding-data-pvc   Bound    1Gi        RWO            local-path
+```
+
+Describing the claim supplied the rest of the evidence:
+
+```text
+StorageClass:  local-path
+Status:        Bound
+Capacity:      1Gi
+Access Modes:  RWO
+VolumeMode:    Filesystem
+Provisioner:   rancher.io/local-path
+Selected Node: lab-node-01
+```
+
+The Flux labels on the PVC also identified the `apps` Kustomization as its manager. The storage existed because Git declared it and Flux reconciled it.
+
+There is an important limitation hiding in `Selected Node: lab-node-01`. This is local storage on the ZBook, not shared storage available from every machine in the cluster. It suits the current single-node lab, but a future Raspberry Pi worker will not magically gain access to the same disk. A multi-node storage design will require an appropriate storage provider and its own trade-offs.
+
+It is also persistence, not a backup or a high-availability design. The data now outlives a pod, but it still depends on the ZBook and its disk.
+
+The dynamically provisioned PV also has a `Delete` reclaim policy. Deleting a pod is safe for the stored data; deleting the PVC is a materially different operation and may delete the PV and its underlying files with it. If Flux pruning is enabled, removing the PVC manifest from Git could cause that deletion through reconciliation, so storage changes deserve the same review as application changes.
+
+## Proving persistence by removing the pod
+
+A `Bound` status proves that Kubernetes matched the claim to a volume. It does not prove that the application is writing the right data to it.
+
+I created a Linkding superuser inside the running container:
+
+```bash
+kubectl exec -it -n linkding deployment/linkding -- \
+  python manage.py createsuperuser \
+  --username=josh \
+  --email=josh@example.com
+```
+
+After port-forwarding the Deployment, I signed in and added a bookmark:
+
+```bash
+kubectl port-forward -n linkding deployment/linkding 8080:9090
+```
+
+Then I deleted the pod.
+
+The Deployment still declared `replicas: 1`, so its ReplicaSet created a replacement. The new pod mounted `linkding-data-pvc`; the PVC remained bound to the existing PV; and Linkding found the same SQLite data under `/etc/linkding/data`. My account and bookmark were both still present.
+
+I also inspected the mounted directory directly:
+
+```bash
+kubectl exec -n linkding deployment/linkding -- \
+  ls -la /etc/linkding/data
+```
+
+The result contained Linkding's SQLite database and associated write-ahead-log files, along with its assets, favicons and previews. Combined with the bound claim and the surviving application data, that completed the persistence test.
+
+The pod was disposable. Its state no longer was.
+
+## Persistent, but still root
+
+Storage solved one problem and made another harder to ignore. Before hardening the workload, an interactive shell opened as root:
+
+```text
+root@linkding-...:/etc/linkding#
+```
+
+Inspecting `/etc/passwd` showed the image's local accounts, including an existing service identity:
+
+```text
+root:x:0:0:root:/root:/bin/bash
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+```
+
+The mounted Linkding data was already owned by `www-data`. UID and GID `33` were therefore the appropriate identity for the workload—not an arbitrary non-root number that might leave Linkding unable to write its database.
+
+I added a pod-level security context to set the runtime user and group, with `fsGroup` providing the group ownership needed for the mounted volume:
+
+```yaml
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 33
+    runAsGroup: 33
+    fsGroup: 33
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: linkding
+      image: sissbruecker/linkding:1.46.2
+      env:
+        - name: LD_DISABLE_BACKGROUND_TASKS
+          value: "True"
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+```
+
+Kubernetes [security contexts](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/) make these controls part of the workload definition. `runAsNonRoot` prevents the container from starting as UID `0`; `runAsUser` and `runAsGroup` select the `www-data` identity; and `fsGroup` allows that group to work with the mounted storage. I also selected the runtime's default seccomp profile, disabled privilege escalation and dropped every Linux capability from the container.
+
+Linkding's optional background-task processor expects a root-managed Supervisor. I do not need its archived-snapshot functionality for this lab, so I disabled it explicitly with `LD_DISABLE_BACKGROUND_TASKS=True` rather than weakening the non-root boundary. Normal authentication, bookmarking, favicons and persistent storage remained available for my use case.
+
+This was another GitOps change. Immediately after the push, Flux still showed the previous revision:
+
+```text
+apps   main@sha1:f4519ffb   True   Applied revision: main@sha1:f4519ffb
+```
+
+After reconciliation, the desired revision moved forward:
+
+```text
+apps   main@sha1:830d8d4c   True   Applied revision: main@sha1:830d8d4c
+```
+
+Changing the pod template caused the Deployment to roll out a new ReplicaSet and replacement pod. Git recorded the security decision, Flux applied it, and Kubernetes performed the rollout.
+
+For an immediate reconciliation of both the Kustomization and its Git source, [Flux also provides](https://fluxcd.io/flux/cmd/flux_reconcile_kustomization/):
+
+```bash
+flux reconcile kustomization apps --with-source
+```
+
+## Verifying the smaller blast radius
+
+The replacement pod started successfully and retained access to its persistent data. This time, opening a shell produced a different identity:
+
+```bash
+kubectl exec -it -n linkding deployment/linkding -- bash
+```
+
+```text
+www-data@linkding-...:/etc/linkding$ whoami
+www-data
+
+www-data@linkding-...:/etc/linkding$ apt update
+Error: Could not open lock file /var/lib/apt/lists/lock - Permission denied
+
+www-data@linkding-...:/etc/linkding$ sudo -i
+bash: sudo: command not found
+```
+
+The useful result is not that the container became read-only—it did not. Linkding still needs write access to `/etc/linkding/data`. The improvement is that Kubernetes now enforces the permissions required to run the application without also accepting the image's default UID `0` identity and its much larger blast radius.
+
+The missing `sudo` command is typical of a minimal container image, while the failed package-manager operation demonstrates the consequence of the non-root identity. The most direct check remains `whoami`: the workload now runs as `www-data`.
+
+I verified the capability boundary from the process metadata as well:
+
+```bash
+kubectl exec -n linkding deployment/linkding -- \
+  grep CapEff /proc/1/status
+```
+
+```text
+CapEff: 0000000000000000
+```
+
+The zeroed effective-capability mask confirmed that `capabilities.drop: [ALL]` had reached the running process. I then port-forwarded the replacement pod, signed in, created another bookmark and confirmed that its favicon and persisted data were still present.
+
+## Testing one control too far
+
+The remaining recommendation I wanted to test was a read-only container root filesystem. I added it in a separate commit:
+
+```yaml
+securityContext:
+  readOnlyRootFilesystem: true
+```
+
+Flux applied the commit, but the new pod entered `CrashLoopBackOff` and the Deployment could not complete its rollout:
+
+```text
+NAME                      READY   STATUS
+linkding-f984dbb8-rhxpd   0/1     CrashLoopBackOff
+```
+
+The container logs explained why:
+
+```text
+FileNotFoundError: No usable temporary directory found in
+['/tmp', '/var/tmp', '/usr/tmp', '/etc/linkding']
+```
+
+The Linkding image needs writable runtime paths in addition to its persistent data directory. A read-only root filesystem could potentially be supported with carefully placed ephemeral volumes and further image-specific configuration, but that was no longer a harmless security flag. It was a compatibility project of its own.
+
+Because the experiment was isolated in Git, recovery was direct. I found the commit, reverted it and pushed the new inverse commit:
+
+```bash
+git revert <commit-sha>
+git push origin main
+flux reconcile kustomization apps --with-source
+```
+
+Flux did not roll the failed change back automatically. I diagnosed the failure and declared the rollback in Git; Flux then reconciled that known-good state. The Deployment produced a healthy replacement pod, the logs returned to normal and Linkding came back with its persisted data intact.
+
+This is hardening, not a declaration that the application is now secure. The test established which controls the workload supports and recorded the rejected one just as clearly as the accepted ones. Network policy, secret management, image maintenance and other controls remain separate concerns.
+
+At this checkpoint:
+
+- Linkding's desired storage and security configuration lives in Git.
+- Flux created and manages the PVC as part of the application reconciliation.
+- K3s dynamically provisioned a 1 GiB local-path PV on `lab-node-01`.
+- Application state survived deletion and replacement of the pod.
+- Kubernetes enforces UID/GID `33` and prevents the container from starting as root.
+- Privilege escalation is explicitly disabled for the container.
+- The RuntimeDefault seccomp profile is selected and the effective capability mask is zero.
+- Optional background processing is deliberately disabled to preserve the non-root boundary.
+- A read-only root filesystem was tested, shown to be incompatible with the current image and reverted through Git.
+- The application remains reachable only through a local port-forward.
+
+The next phase changes that final point. I will expose Linkding through a Cloudflare Tunnel. Before giving it a route to the public internet, Linkding can now keep its memory—and has forgotten how to be root.
