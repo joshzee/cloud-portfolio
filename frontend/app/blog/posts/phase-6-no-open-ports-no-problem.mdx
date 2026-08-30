@@ -1,0 +1,313 @@
+---
+title: "No Open Ports, No Problem"
+summary: "Publishing Linkding through a locally managed Cloudflare Tunnel while keeping the Kubernetes Service private and the tunnel credential out of Git."
+publishedAt: "2026-08-29"
+slug: "phase-6-no-open-ports-no-problem"
+tags:
+  - homelab
+  - kubernetes
+  - k3s
+  - gitops
+  - flux
+  - cloudflare
+  - networking
+  - linkding
+---
+
+Linkding had reached the point where it could survive a replacement pod and run without root privileges. It was useful, persistent and reasonably hardened—but reaching it still required a local `kubectl port-forward` session.
+
+This phase gave it a real address on the internet without giving my ZBook one.
+
+I used a Cloudflare Tunnel to publish Linkding through an outbound connection from Kubernetes. There would be no router port-forward, no public IP attached to the Service and no inbound firewall rule leading back into the homelab.
+
+The result is now live at `https://linkding.joshlabs.me`. Getting there involved DNS delegation, two different kinds of tunnel configuration, one deliberate exception to GitOps and a useful reminder that “publicly reachable” does not have to mean “publicly addressed.”
+
+## Moving the domain before moving the traffic
+
+I first moved `joshlabs.me` onto Cloudflare's nameservers. Cloudflare reported the zone as active, but my normal DNS resolver continued returning the previous nameservers:
+
+```bash
+dig NS joshlabs.me +short
+```
+
+Different public resolvers briefly disagreed about the result. Querying the `.me` parent delegation and another recursive resolver showed that the registrar change had taken effect; my local resolver was simply holding the old delegation in cache.
+
+That distinction matters. The source of truth had changed, but not every cache had expired yet. Cloudflare could correctly activate the zone while some clients still followed the old path.
+
+Once the authoritative delegation was in place, I could continue with the tunnel rather than repeatedly changing a configuration that was already correct.
+
+## Creating a locally managed tunnel
+
+The course uses a [locally managed Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/advanced/local-management/). In this model, the connector's routing rules live in a local configuration file rather than being stored entirely in Cloudflare's control plane.
+
+The course moved directly to the login command, but `cloudflared` was not installed on my MacBook yet. Homebrew supplied the missing prerequisite:
+
+```bash
+brew install cloudflared
+cloudflared --version
+```
+
+I then authenticated the CLI against my Cloudflare account:
+
+```bash
+cloudflared tunnel login
+```
+
+This created `cert.pem` under `~/.cloudflared`. That certificate is an account-level management credential: it can be used to create and administer tunnels and DNS routes. It does not belong in Kubernetes or Git.
+
+I created a tunnel named `ldzb`, short for Linkding ZBook:
+
+```bash
+cloudflared tunnel create ldzb
+```
+
+Cloudflare assigned it a UUID and wrote a tunnel-specific JSON credential:
+
+```text
+~/.cloudflared/<TUNNEL-UUID>.json
+```
+
+The JSON credential has a much narrower purpose than `cert.pem`: it authorises a connector to run this tunnel. The UUID is an identifier, not the secret; the contents of the JSON file are the credential.
+
+## One intentional exception to GitOps
+
+Most of this cluster's desired state travels through Git and Flux. Committing a plaintext tunnel credential to make that principle look pure would defeat the point.
+
+The course introduces encrypted secret management in the next phase, so I created this Secret directly in the cluster as a temporary bootstrap step:
+
+```bash
+kubectl create secret generic tunnel-credentials \
+  --namespace=linkding \
+  --from-file=credentials.json="$HOME/.cloudflared/<TUNNEL-UUID>.json"
+```
+
+The argument has two filenames with different jobs:
+
+```text
+--from-file=credentials.json=/path/to/<TUNNEL-UUID>.json
+            ^ key in Secret   ^ source file on the MacBook
+```
+
+Kubernetes stores the file contents under the key `credentials.json`. When the Secret is mounted as a volume, that key becomes the filename expected by the `cloudflared` configuration.
+
+I verified the Secret without printing its contents:
+
+```bash
+kubectl describe secret tunnel-credentials -n linkding
+```
+
+```text
+Name:         tunnel-credentials
+Namespace:    linkding
+Type:         Opaque
+
+Data
+====
+credentials.json:  175 bytes
+```
+
+This is deliberately not a complete GitOps solution. Flux can rebuild the Deployment and ConfigMap, but a fresh cluster cannot yet recreate this Secret from the repository. I am retaining the source credential securely until the next phase replaces this manual dependency and proves that it can be recovered.
+
+## Routing DNS without copying the UUID
+
+The Cloudflare dashboard can create the required DNS record, but the CLI already knew both the tunnel and the authenticated zone. I used it to attach the public hostname:
+
+```bash
+cloudflared tunnel route dns ldzb linkding.joshlabs.me
+```
+
+That command created a proxied CNAME from `linkding.joshlabs.me` to the tunnel's `<TUNNEL-UUID>.cfargotunnel.com` address. The DNS record and tunnel are separate pieces: creating the CNAME points traffic at the tunnel, but the application cannot respond until a connector is running.
+
+Using the tunnel name made the command readable and avoided manually copying the UUID into the Cloudflare dashboard.
+
+## Giving Linkding a stable address inside the cluster
+
+Until now, port-forwarding had connected directly to the Linkding workload. The tunnel needed a stable Kubernetes destination, so I added a `ClusterIP` Service to the Linkding base:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: linkding
+spec:
+  ports:
+    - port: 9090
+  selector:
+    app: linkding
+  type: ClusterIP
+```
+
+The selector targets pods carrying `app: linkding`, while the Service gives them a stable in-cluster name and virtual IP. Replacement pods can come and go without changing the address used by `cloudflared`.
+
+I added `service.yaml` to the base Kustomize resources because internal service discovery is part of the application itself. The Cloudflare resources went under the staging overlay instead. Another environment might expose Linkding through a different ingress implementation—or not expose it at all—so the tunnel does not belong in the reusable base.
+
+That separation became one of the more useful design decisions in this phase:
+
+```text
+apps/base/linkding/service.yaml
+    reusable application networking
+
+apps/staging/linkding/cloudflare.yaml
+    environment-specific external exposure
+```
+
+## Running the connector in Kubernetes
+
+The staging manifest defines two resources: a `cloudflared` Deployment and the ConfigMap it consumes.
+
+The Deployment runs two connector replicas, checks the `/ready` endpoint exposed with the metrics server and mounts both configuration and credentials as read-only volumes:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cloudflared
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+    spec:
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:latest
+          args:
+            - tunnel
+            - --config
+            - /etc/cloudflared/config/config.yaml
+            - run
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            failureThreshold: 1
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /etc/cloudflared/config
+              readOnly: true
+            - name: creds
+              mountPath: /etc/cloudflared/creds
+              readOnly: true
+      volumes:
+        - name: creds
+          secret:
+            secretName: tunnel-credentials
+        - name: config
+          configMap:
+            name: cloudflared
+            items:
+              - key: config.yaml
+                path: config.yaml
+```
+
+Both replicas use the same named tunnel and credential. This provides connector-process redundancy, but it is not node-level high availability: my cluster still has one physical node, so both pods share the ZBook as a failure domain.
+
+The ConfigMap supplies the locally managed tunnel configuration:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared
+data:
+  config.yaml: |
+    tunnel: ldzb
+    credentials-file: /etc/cloudflared/creds/credentials.json
+
+    metrics: 0.0.0.0:2000
+    no-autoupdate: true
+
+    ingress:
+      - hostname: linkding.joshlabs.me
+        service: http://linkding:9090
+      - service: http_status:404
+```
+
+The first ingress rule maps the public hostname to the Kubernetes Service. Because `cloudflared` runs in the same namespace, `http://linkding:9090` resolves through normal cluster DNS. The final rule is the required catch-all: unmatched requests receive a `404` instead of falling through to an unintended service.
+
+The current Cloudflare Kubernetes guide demonstrates a remotely managed tunnel using a token and therefore has no ConfigMap. That is a different configuration model, not an omitted resource. My locally managed tunnel keeps its ingress rules here and mounts the tunnel-specific JSON credential from the Secret.
+
+## Letting Flux open the route
+
+The tunnel credential was the one imperative bootstrap action. The Service, Deployment and ConfigMap followed the normal delivery path: add them to their respective Kustomizations, commit and push.
+
+Flux reconciled revision `6f104c8f`:
+
+```text
+NAME          REVISION            SUSPENDED   READY   MESSAGE
+apps          main@sha1:6f104c8f  False       True    Applied revision: main@sha1:6f104c8f
+```
+
+The Linkding namespace then contained the application pod and two healthy connectors:
+
+```bash
+kubectl get pods -n linkding
+```
+
+```text
+NAME                          READY   STATUS    RESTARTS
+cloudflared-f8dd4bd49-2vrch   1/1     Running   0
+cloudflared-f8dd4bd49-d994m   1/1     Running   0
+linkding-856975547f-kh9lr     1/1     Running   0
+```
+
+The Service looked deliberately unremarkable:
+
+```bash
+kubectl get service linkding -n linkding
+```
+
+```text
+NAME       TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)
+linkding   ClusterIP   <CLUSTER-IP>  <none>        9090/TCP
+```
+
+`EXTERNAL-IP: <none>` is the success condition here. Linkding remains privately addressed inside Kubernetes. The `cloudflared` pods establish outbound connections to Cloudflare, accept traffic arriving through that tunnel and forward matching requests to the internal Service.
+
+No inbound port was opened on the router. No public load balancer was created. Nothing needed to know the ZBook's public IP.
+
+## HTTPS at the edge
+
+Opening `https://linkding.joshlabs.me` presented the live Linkding login page from outside my home network.
+
+I also enabled Cloudflare's [Always Use HTTPS](https://developers.cloudflare.com/ssl/edge-certificates/additional-options/always-use-https/) setting and tested the plain HTTP address:
+
+```text
+http://linkding.joshlabs.me
+```
+
+Cloudflare immediately redirected the request to HTTPS. This setting applies across the Cloudflare zone, so it is a zone-level decision rather than a Linkding-specific container setting.
+
+There is a useful boundary to state precisely. The browser connects to Cloudflare over HTTPS, and `cloudflared` maintains an encrypted outbound tunnel to Cloudflare's edge. My ingress rule then uses ordinary HTTP from the connector pod to the Linkding Service inside the cluster:
+
+```text
+Browser
+  -> HTTPS to Cloudflare
+  -> encrypted Cloudflare Tunnel
+  -> cloudflared pod
+  -> HTTP to linkding:9090
+  -> Linkding pod
+```
+
+The public connection is protected without requiring Linkding itself to terminate TLS, but this is not the same thing as application-level TLS on every internal hop.
+
+At this checkpoint:
+
+- `linkding.joshlabs.me` is publicly resolvable through a proxied Cloudflare CNAME.
+- Two `cloudflared` pods maintain the outbound tunnel from the K3s cluster.
+- Linkding remains behind a private `ClusterIP` Service with no external IP.
+- The Service lives in the reusable base, while Cloudflare-specific exposure lives in the staging overlay.
+- Flux applied and reports the Git revision containing the Service, Deployment and ConfigMap.
+- HTTP requests are redirected to HTTPS at Cloudflare's edge.
+- No router port-forward or inbound firewall opening was required.
+- The tunnel credential is absent from Git but still depends on one manual Kubernetes Secret.
+
+That final point is the next phase. Kubernetes will still need a Secret—the improvement is making its delivery encrypted, declarative and recoverable instead of depending on a one-time CLI command.
+
+Linkding is now available from anywhere. Next, I need to make sure rebuilding the cluster does not depend on remembering what I typed before putting it there.
