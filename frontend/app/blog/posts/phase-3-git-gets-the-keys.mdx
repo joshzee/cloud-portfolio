@@ -1,8 +1,8 @@
 ---
-title: "Git Gets the Keys"
+title: "Phase 3: Git Gets the Keys"
 summary: "Bootstrapping Flux into my K3s homelab and turning a GitHub repository into the declared source of cluster state."
 publishedAt: "2026-08-18"
-slug: "HL-phase-3-git-gets-the-keys"
+slug: "phase-3-git-gets-the-keys"
 tags:
   - homelab
   - kubernetes
@@ -20,11 +20,11 @@ For the next phase, that answer will live in Git.
 
 The two names I encountered most often when reading about Kubernetes GitOps were [Flux](https://fluxcd.io/) and [Argo CD](https://argo-cd.readthedocs.io/). Both continuously compare a declared state with the state of a cluster, but they present that workflow differently.
 
-Argo CD provides a prominent web interface as well as a CLI. Flux is more CLI- and Kubernetes-API-first and does not ship with an equivalent central dashboard. The course deliberately uses Flux so that I work directly with Git, manifests and reconciliation rather than learning the workflow mainly through a UI.
+Argo CD provides a prominent web interface as well as a CLI. Flux is more CLI- and Kubernetes-API-first and does not ship with an equivalent central dashboard. The community learning path starts with Flux so that I work directly with Git, manifests and reconciliation rather than learning the workflow mainly through a UI.
 
 That does not make Flux universally better, or Argo CD something I can ignore. It simply makes Flux a useful first implementation of GitOps because fewer details are hidden from me.
 
-There is also some practical relevance to the mentor's Azure-focused work. Microsoft provides [Flux v2 as the `microsoft.flux` cluster extension](https://learn.microsoft.com/en-us/azure/azure-arc/kubernetes/conceptual-gitops-flux2) for both Azure Kubernetes Service and Azure Arc-enabled Kubernetes. Flux is not restricted to Azure—and Azure can also run Argo CD—but it has a clear first-party integration path there.
+The choice also has practical relevance for Azure-focused environments. Microsoft provides [Flux v2 as the `microsoft.flux` cluster extension](https://learn.microsoft.com/en-us/azure/azure-arc/kubernetes/conceptual-gitops-flux2) for both Azure Kubernetes Service and Azure Arc-enabled Kubernetes. Flux is not restricted to Azure—and Azure can also run Argo CD—but it has a clear first-party integration path there.
 
 ## Preparing the repository
 

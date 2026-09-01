@@ -1,5 +1,5 @@
 ---
-title: "One Node, One Character Off"
+title: "Phase 2: One Node, One Character Off"
 summary: "Installing K3s on the ZBook, investigating two deceptively similar Helm flags and securely managing the cluster from my MacBook."
 publishedAt: "2026-08-17"
 slug: "phase-2-one-node-one-character-off"
@@ -17,7 +17,7 @@ K3s is a lightweight, fully conformant Kubernetes distribution. It packages the 
 
 ## Installing K3s
 
-I entered a root login shell and ran the official installation script using the command from the course:
+I entered a root login shell and ran the official installation script using the reference command from the community homelab path:
 
 ```bash
 sudo -i
@@ -30,20 +30,20 @@ A K3s server can also run workloads by default. Later, I will add a Raspberry Pi
 
 ## The one-character difference that changed the result
 
-The course command included `--disable=helm-controller`, which I initially interpreted as disabling K3s's native Helm Controller. My first installation used what appeared to be the equivalent dedicated flag:
+The reference command included `--disable=helm-controller`, which I initially interpreted as disabling K3s's native Helm Controller. My first installation used what appeared to be the equivalent dedicated flag:
 
 ```text
 --disable-helm-controller
 ```
 
-That cluster started with three visible system pods: CoreDNS, Metrics Server and the Local Path Provisioner. The mentor's cluster had two additional pods:
+That cluster started with three visible system pods: CoreDNS, Metrics Server and the Local Path Provisioner. The community reference environment had two additional pods:
 
 ```text
 helm-install-traefik-crd-*
 helm-install-traefik-*
 ```
 
-My first suspicion was the obvious hardware difference—his server was a Raspberry Pi and mine was an Intel ZBook—but those pods had nothing to do with CPU architecture. They were Helm jobs installing K3s's packaged Traefik ingress controller.
+My first suspicion was the obvious hardware difference—the reference server was a Raspberry Pi and mine was an Intel ZBook—but those pods had nothing to do with CPU architecture. They were Helm jobs installing K3s's packaged Traefik ingress controller.
 
 The actual difference was a single character:
 
@@ -54,7 +54,7 @@ The actual difference was a single character:
 
 K3s treats `--disable=<name>` as a request to disable a packaged AddOn such as `traefik`, `coredns` or `metrics-server`. `helm-controller` is not one of those AddOn names. The dedicated `--disable-helm-controller` flag is what stops the controller itself.
 
-I had therefore disabled the controller more completely than the course environment. To keep the rest of the lab reproducible, I reran the installer with the course command and confirmed that my pod output now matched the mentor's environment, including the Traefik installation jobs.
+I had therefore disabled the controller more completely than the community reference environment. To keep the rest of the lab reproducible, I reran the installer with the reference command and confirmed that my pod output now matched the expected environment, including the Traefik installation jobs.
 
 The useful lesson was not merely which spelling to use. Comparing the expected and actual cluster state exposed what each flag really controlled—and reinforced that a successful command is not the same thing as a verified outcome.
 

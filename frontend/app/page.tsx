@@ -31,9 +31,10 @@ export default function Page() {
 
 
 
-			<div className="my-8">
+			{/* <div className="my-8">
 				<ProjectList />
-			</div>
+			</div> */}
+			
 			<ParticlesBackrgound />
 		</section>
 	);
