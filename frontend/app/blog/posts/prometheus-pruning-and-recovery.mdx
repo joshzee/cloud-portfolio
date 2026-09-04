@@ -1,0 +1,344 @@
+---
+title: "Prometheus, Pruning, and Recovery"
+summary: "Deploying kube-prometheus-stack through Flux and Helm, then tracing a pruning cascade through Git and recovering the cluster from desired state."
+publishedAt: "2026-09-04"
+slug: "prometheus-pruning-and-recovery"
+tags:
+  - homelab
+  - kubernetes
+  - k3s
+  - gitops
+  - flux
+  - helm
+  - prometheus
+  - grafana
+  - troubleshooting
+---
+
+The plan was to add monitoring to the homelab. Before I reached the first dashboard, I got a practical demonstration of why GitOps needs both observability and respect for `prune: true`.
+
+I deployed the Prometheus community's `kube-prometheus-stack` through Flux and Helm. Along the way, a file-path error removed two Kustomization definitions from the active resource graph. Flux responded by deleting the resources they managed—including the Linkding and monitoring namespaces.
+
+The application definitions were still in Git. The application data was not.
+
+That made this phase about more than installing Prometheus and Grafana. It became an exercise in following controller ownership, reading reconciliation events, recovering from versioned desired state and separating persistent storage from an actual backup.
+
+## Helm without `helm install`
+
+The traditional Helm workflow would begin by registering a chart repository on my workstation:
+
+```bash
+helm repo add prometheus-community \
+  https://prometheus-community.github.io/helm-charts
+```
+
+That changes local Helm client configuration. It does not give the cluster a continuously reconciled declaration of where the package came from or how it should be installed.
+
+Flux provides two custom resources for that workflow:
+
+- `HelmRepository` declares the chart source and is reconciled by Flux's Source Controller.
+- `HelmRelease` declares the chart, version and values and is reconciled by Flux's Helm Controller.
+
+This is the first phase where I am actively using the Flux Helm Controller installed during bootstrap. It is separate from K3s's native Helm Controller: they use different APIs and reconcile different resource types. Here, Flux owns the release through `helm.toolkit.fluxcd.io/v2` and `kind: HelmRelease`.
+
+The practical comparison is:
+
+```text
+helm repo add     -> HelmRepository in Git
+helm install      -> HelmRelease in Git
+helm upgrade      -> change the declaration in Git
+manual rollback   -> revert the declaration in Git
+```
+
+## Separating the monitoring stack
+
+I gave monitoring its own configuration hierarchy rather than mixing a large third-party stack into the Linkding application tree:
+
+```text
+monitoring
+└── controllers
+    ├── base
+    │   └── kube-prometheus-stack
+    │       ├── kustomization.yaml
+    │       ├── namespace.yaml
+    │       ├── repository.yaml
+    │       └── release.yaml
+    └── staging
+        ├── kube-prometheus-stack
+        │   └── kustomization.yaml
+        └── kustomization.yaml
+```
+
+The cluster entry point is a Flux Kustomization named `monitoring-controllers`:
+
+```yaml
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: monitoring-controllers
+  namespace: flux-system
+spec:
+  interval: 1m0s
+  retryInterval: 1m
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./monitoring/controllers/staging
+  prune: true
+```
+
+This gives monitoring an independent reconciliation boundary. Application changes remain under `apps`; monitoring controllers have their own path, status and inventory.
+
+## Declaring the chart source
+
+The base creates a dedicated namespace:
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+```
+
+It then registers the Prometheus community chart repository:
+
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: kube-prometheus-stack
+  namespace: monitoring
+spec:
+  interval: 24h
+  url: https://prometheus-community.github.io/helm-charts
+```
+
+The namespace on this object does not mean the remote repository is installed there. It means the Kubernetes `HelmRepository` object lives there. Flux's Source Controller fetches and stores the repository index as an internal artifact, making it available to namespaced consumers such as the `HelmRelease`.
+
+The release references that source and pins an explicit chart version:
+
+```yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kube-prometheus-stack
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      version: "66.2.2"
+      sourceRef:
+        kind: HelmRepository
+        name: kube-prometheus-stack
+        namespace: monitoring
+      interval: 12h
+  install:
+    crds: Create
+  upgrade:
+    crds: CreateReplace
+  driftDetection:
+    mode: enabled
+    ignore:
+      - paths:
+          - /metadata/annotations/prometheus-operator-validated
+        target:
+          kind: PrometheusRule
+```
+
+Pinning the chart makes the deployment reproducible instead of allowing an upstream release to change unexpectedly. The repository interval controls how often Flux refreshes the chart index, the chart interval controls how often it checks the selected artifact and the release interval controls reconciliation of the installed release.
+
+The chart also introduces Custom Resource Definitions used by the Prometheus Operator. `Create` handles their initial installation, while `CreateReplace` permits Flux to update them during a chart upgrade. Drift detection instructs the Helm Controller to compare the rendered release with the live cluster and correct differences. The targeted ignore prevents an operator-added validation annotation from becoming permanent false drift.
+
+I am deliberately omitting the Grafana administrator credential from this post. The current deployment remains reachable only through a local port-forward, but that credential should move from an inline chart value to a SOPS-managed Secret before Grafana is exposed through ingress.
+
+## A reconcile with consequences
+
+While adding the new monitoring entry point, I moved `apps.yaml` and `monitoring.yaml` one directory too deep. They ended up beside the generated Flux bootstrap manifests:
+
+```text
+clusters/staging/flux-system/
+├── apps.yaml
+├── monitoring.yaml
+├── gotk-components.yaml
+├── gotk-sync.yaml
+└── kustomization.yaml
+```
+
+The files still existed, but existence is not inclusion. The nested `kustomization.yaml` only listed the generated Flux resources, so Kustomize did not include the two additional files in its rendered output.
+
+I then requested an immediate application reconciliation:
+
+```bash
+flux reconcile kustomization apps --with-source
+```
+
+The command itself was valid. `--with-source` first made Flux fetch the newest Git revision, which exposed the path error immediately. Because the shared source revision had changed, the parent `flux-system` reconciliation also evaluated its desired state.
+
+From its perspective, the `apps` and `monitoring-controllers` Kustomizations had disappeared from Git's rendered configuration. Both were managed with pruning enabled, so the deletion cascaded:
+
+```text
+new Git artifact
+  -> parent build omits apps and monitoring-controllers
+  -> flux-system prunes both Kustomization objects
+  -> their deletion policies prune their managed inventories
+  -> Linkding and monitoring namespaces are deleted
+```
+
+The namespace list was reduced to the cluster's core namespaces. Trying to suspend application reconciliation produced a more useful clue:
+
+```bash
+flux suspend kustomization apps
+```
+
+```text
+Kustomization apps not found in flux-system namespace
+```
+
+The application reconciliation was not merely unhealthy; its custom resource had been deleted.
+
+## Following ownership instead of guessing
+
+Flux events exposed the parent action directly:
+
+```text
+Kustomization/flux-system/apps deleted
+```
+
+I used the controller hierarchy and Git history to work backwards:
+
+```bash
+kubectl get kustomizations.kustomize.toolkit.fluxcd.io -A
+
+flux events \
+  --for Kustomization/flux-system \
+  --namespace=flux-system
+
+git ls-tree -r --name-only <REVISION> -- clusters/staging
+```
+
+That separated three different questions:
+
+1. Which Kubernetes objects still existed?
+2. Which controller deleted the child Kustomization?
+3. What directory structure existed in the exact Git revision Flux applied?
+
+The repository was more than a deployment source here. It was the record needed to reproduce the controller's decision.
+
+## Correcting the graph
+
+The fix was to restore the two declarations as siblings of the generated `flux-system` directory:
+
+```text
+clusters/staging/
+├── apps.yaml
+├── monitoring.yaml
+└── flux-system/
+    ├── gotk-components.yaml
+    ├── gotk-sync.yaml
+    └── kustomization.yaml
+```
+
+Before committing, I staged the changes and used Git's rename detection to confirm that I had changed only the paths:
+
+```bash
+git add -A
+git diff --cached --summary
+```
+
+```text
+rename clusters/staging/{flux-system => }/apps.yaml (100%)
+rename clusters/staging/{flux-system => }/monitoring.yaml (100%)
+```
+
+The 100% similarity was useful evidence: the declarations themselves had not changed. I committed the structural correction and pushed it:
+
+```bash
+git commit -m "fix: restore cluster reconciliation paths"
+git push origin main
+```
+
+The surviving parent Kustomization observed the new revision and recreated both children. Watching their status showed the dependency chain repair itself:
+
+```bash
+flux get kustomizations --watch
+```
+
+```text
+NAME                    SUSPENDED   READY   MESSAGE
+flux-system             False       True    Applied revision: main@sha1:ad93b2b5
+monitoring-controllers  False       True    Applied revision: main@sha1:ad93b2b5
+apps                    False       True    Applied revision: main@sha1:ad93b2b5
+```
+
+No series of imperative `kubectl apply` commands was needed to reconstruct the workloads. Restoring the declarations restored the reconciliation hierarchy, which restored the namespaces and their resources.
+
+## Persistent is not backed up
+
+The manifests recovered. Linkding's previous data did not.
+
+When the `linkding` namespace was deleted, Kubernetes deleted its PersistentVolumeClaim. The K3s `local-path` StorageClass had dynamically provisioned its PersistentVolume with a `Delete` reclaim policy, so removing the claim also removed the PV and its backing directory.
+
+I checked both layers before allowing myself to assume anything:
+
+```bash
+kubectl get pv
+```
+
+```text
+No resources found
+```
+
+On the ZBook, I searched the local-path provisioner's storage directory for the old Linkding allocation:
+
+```bash
+sudo find /var/lib/rancher/k3s/storage \
+  -maxdepth 1 \
+  -type d \
+  -name '*linkding*' \
+  -print
+```
+
+It returned nothing. Flux could recreate the PVC declaration, and K3s could provision a new volume, but neither system could reconstruct the deleted SQLite data.
+
+That sharpened the storage model from Phase 5:
+
+```text
+pod deleted        -> PVC remains -> data survives
+namespace deleted  -> PVC deleted -> Delete policy removes PV and data
+```
+
+Persistence is a workload property. Backup and recovery are separate operational capabilities. Before this homelab holds anything important, it needs scheduled backups or a deliberately tested retention and restore strategy.
+
+## Finally, the dashboard
+
+Once the reconciliation hierarchy was healthy again, I verified the Helm source, release and monitoring workloads independently:
+
+```bash
+flux get sources helm -A
+flux get helmreleases -A
+kubectl get pods -n monitoring
+```
+
+The stack was running, including Prometheus, Grafana, the Prometheus Operator and supporting exporters. I kept Grafana private and forwarded it to my workstation:
+
+```bash
+kubectl -n monitoring port-forward \
+  service/kube-prometheus-stack-grafana 8080:80
+```
+
+Opening `http://localhost:8080` confirmed that Grafana was available without creating a public Service or changing the router.
+
+At this checkpoint:
+
+- Flux manages the Prometheus community Helm repository and the pinned `kube-prometheus-stack` release from Git.
+- Monitoring has its own namespace, staging overlay and Flux reconciliation boundary.
+- The Flux Helm Controller manages installation, CRDs, upgrades and drift detection.
+- Prometheus and Grafana are running, with Grafana currently accessible through local port-forwarding.
+- A Git path error was traced through Flux events and an exact repository revision rather than repaired by guesswork.
+- Restoring two versioned declarations rebuilt the application and monitoring control paths.
+- The loss of the local-path volume proved that a PVC is not a backup.
+
+The next phase replaces Grafana's temporary port-forward with cluster ingress through Traefik. Before anything crosses that boundary, authentication, secrets and exposure deserve the same deliberate treatment as the deployment itself.
