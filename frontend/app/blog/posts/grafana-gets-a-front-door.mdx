@@ -1,0 +1,193 @@
+---
+title: "Grafana Gets a Front Door"
+publishedAt: "2026-09-09"
+summary: "I wanted to stop port-forwarding Grafana. Along the way: an overdue chart upgrade, encrypted credentials, and a certificate my browser quite reasonably refused to trust."
+slug: "grafana-gets-a-front-door"
+tags:
+  - homelab
+  - kubernetes
+  - k3s
+  - flux
+  - helm
+  - grafana
+  - traefik
+  - sops
+  - tls
+---
+
+Grafana was working. Prometheus was collecting metrics, the dashboards had something to say, and I could reach all of it as long as I remembered to leave a port-forward running in a terminal.
+
+I wanted to give it a proper address: `grafana.joshlabs.me`. A small enough request, considering the amount of infrastructure already involved in telling me how busy my laptop was.
+
+But before making the dashboard easier to reach, I had a few things to sort out. The monitoring chart was still pinned to an older version. Grafana's administrator password needed to move out of the Helm values. And although I'd already used Cloudflare Tunnel for Linkding, this time I wanted to understand HTTPS on the cluster itself.
+
+That became the useful part of the exercise. The URL was the reason to start; deciding what sat behind it took most of the thought.
+
+## The version pin had been doing its job
+
+In [the previous post](/blog/prometheus-pruning-and-recovery), getting monitoring running involved recovering from a Flux pruning incident. With that behind me, I could look at the stack without also wondering where my namespaces had gone.
+
+The chart started at `66.2.2`, moved to `66.6.0`, and was still there when I began planning Grafana's Ingress. Pinning it had kept the deployment predictable. It had also left the maintenance decision with me.
+
+Before changing the chart, I checked the platform underneath it. The node was already running `v1.36.3+k3s1`; my local `kubectl` was `v1.36.1`. There was no need to turn a monitoring upgrade into a Kubernetes upgrade as well.
+
+On the ZBook, I inspected how K3s actually started:
+
+```bash
+sudo systemctl show k3s --property=ExecStart --no-pager
+```
+
+`--property=ExecStart` asks systemd for the service's startup command, and `--no-pager` prints it directly. The output showed `/usr/local/bin/k3s server --disable=helm-controller`. Recording that matters for a future K3s upgrade: the existing startup options are part of the installation, even if I haven't thought about them since setting it up.
+
+The datastore inspection was useful too. This cluster had `state.db` and its SQLite WAL/SHM files, so the relevant backup procedure was the SQLite one. [K3s documents](https://docs.k3s.io/datastore/backup-restore) the database directory and server token as required restore material. A consistent filesystem copy needs care around active database writes; casually copying just `state.db` while K3s is running isn't the procedure I'd rely on.
+
+There is a separate boundary here that the earlier storage incident made quite memorable: backing up Kubernetes' datastore does not back up Linkding's files on its persistent volume. Both need attention. Identifying the backup material also isn't the same as proving a restore works.
+
+For the monitoring upgrade, I selected `kube-prometheus-stack` **89.2.2** and kept that exact version in Git. Those numbers refer to the chart, not Grafana itself. This particular chart [includes Grafana chart 13.2.1 as a dependency](https://github.com/prometheus-community/helm-charts/blob/kube-prometheus-stack-89.2.2/charts/kube-prometheus-stack/Chart.yaml).
+
+A jump from 66.x to 89.x crosses multiple chart releases. My successful rollout is evidence about this lab, not a promise that another cluster can make the same jump without reviewing its values and the intervening upgrade notes.
+
+Flux's HelmRelease already allowed CRD replacement during upgrades. After reconciliation, it reported chart `89.2.2` successfully installed. I checked beyond that status: all monitoring pods were running, Grafana accepted my login, the Kubernetes dashboards populated, and Prometheus remained the configured data source. Linkding and its Ingress still worked too.
+
+That's the maintenance pattern I want to keep: choose a specific release, declare it in Git, and check the application after the rollout. Letting the chart version float wouldn't do those checks for me.
+
+## Giving the password somewhere better to live
+
+The administrator password had been committed as an inline Helm value during the initial setup. Moving the same password into an encrypted file wouldn't undo that exposure, so I replaced it with a new credential as well.
+
+I'd already used SOPS and age for Linkding. Grafana could use the same delivery mechanism: an encrypted Kubernetes Secret manifest in Git, decrypted by Flux and referenced by the workload. The chart supports an existing Secret, so there was no reason to put the replacement password inside the HelmRelease.
+
+The one detail that needed separate configuration was Flux's reconciliation boundary. Linkding's `apps` Kustomization already knew how to decrypt SOPS files. Monitoring had its own Kustomization, so I enabled decryption there too:
+
+```yaml
+# Under spec in the monitoring-controllers Flux Kustomization
+decryption:
+  provider: sops
+  secretRef:
+    name: sops-age
+```
+
+The encrypted manifest creates `grafana-admin-credentials` in the `monitoring` namespace, with `admin-user` and `admin-password` keys. The HelmRelease references those names; the actual values stay out of its configuration.
+
+After Flux reconciled the changes, I signed in through the port-forward with the new credentials. That gave me a working authentication check before changing how I reached Grafana.
+
+There is a Grafana-specific wrinkle for later: the initial administrator settings aren't a universal password-rotation mechanism for an existing database. If Grafana retains its database, changing a Secret alone may leave the stored password untouched. Moving configuration into Git doesn't remove the need to understand how the application uses it.
+
+## A hostname without another ingress controller
+
+Traefik was already running in K3s. I had practised routing Linkding through it, so Grafana didn't need another controller installation. It needed an Ingress rule pointing at its existing Service.
+
+I wanted Helm to generate that rule. To see what my pinned chart offered, I inspected its values:
+
+```bash
+helm show values prometheus-community/kube-prometheus-stack \
+  --version 89.2.2
+```
+
+This also exposed a useful detail about chart dependencies. The parent chart's values file doesn't repeat every setting available in its Grafana subchart. For example, the parent didn't list `grafana.ingress.pathType`, while [the bundled Grafana chart](https://github.com/grafana-community/helm-charts/blob/grafana-13.2.1/charts/grafana/values.yaml) defaults it to `Prefix`. An option being absent from `helm show values` isn't, by itself, proof that the dependency doesn't support it. I left the default in place.
+
+With Ingress enabled for `grafana.joshlabs.me`, Flux reconciled the HelmRelease and Helm generated the resource. Traefik picked up the host rule and forwarded requests to Grafana's Service.
+
+For DNS, I added a DNS-only A record in Cloudflare pointing to the ZBook's private LAN address. I'd initially used a hosts-file entry for the Linkding test; using DNS meant I didn't have to repeat that edit on every machine.
+
+Cloudflare was only answering the DNS query here. Traffic from my browser went directly to the ZBook over the LAN. A real domain name doesn't make a private address reachable from the internet, and no Cloudflare Tunnel was involved in Grafana's route.
+
+Opening the new HTTP address brought up Grafana, and its dashboards populated. The port-forward could finally have the afternoon off.
+
+## Making HTTPS my responsibility
+
+With the earlier Linkding tunnel, Cloudflare handled the browser-facing certificate. For Grafana, Traefik would present a certificate from a Kubernetes Secret. I chose a self-signed certificate for this local exercise and a 90-day lifetime so that renewal would become something to practise.
+
+I generated the certificate and key with OpenSSL in a private temporary directory. These options set the lifetime and hostname:
+
+```bash
+-days 90 \
+-subj "/CN=grafana.joshlabs.me" \
+-addext "subjectAltName=DNS:grafana.joshlabs.me"
+```
+
+These are options from the generation command, rather than a standalone command. The Common Name describes the subject; the Subject Alternative Name is where browsers check the hostname. I also marked the certificate for server authentication and explicitly set `CA:FALSE`.
+
+Inspecting the finished certificate showed exactly what I needed:
+
+```text
+notBefore=Sep  9 07:44:33 2026 GMT
+notAfter=Dec  8 07:44:33 2026 GMT
+X509v3 Subject Alternative Name:
+    DNS:grafana.joshlabs.me
+```
+
+I used descriptive local filenames, `grafana-tls.crt` and `grafana-tls.key`. Kubernetes' TLS Secret needs entries named `tls.crt` and `tls.key`, but `kubectl create secret tls` handles that mapping. From the repository root, with `GRAFANA_TLS_DIR` holding the temporary directory's path, I generated the manifest:
+
+```bash
+(
+  umask 077
+
+  kubectl create secret tls grafana-tls \
+    --namespace=monitoring \
+    --cert="$GRAFANA_TLS_DIR/grafana-tls.crt" \
+    --key="$GRAFANA_TLS_DIR/grafana-tls.key" \
+    --dry-run=client \
+    -o yaml > monitoring/controllers/staging/kube-prometheus-stack/grafana-tls-secret.yaml
+)
+
+sops --encrypt --in-place \
+  monitoring/controllers/staging/kube-prometheus-stack/grafana-tls-secret.yaml
+```
+
+`--dry-run=client` writes the definition without creating a live Secret. The subshell's `umask 077` restricts the new file's permissions during the short period before encryption. That matters because the generated values are initially base64, including the private key.
+
+I verified that SOPS reported the file as encrypted and added it to the staging Kustomization beside the encrypted admin Secret. The final Grafana values were compact enough to read without hunting through generated manifests:
+
+```yaml
+# Excerpt from the HelmRelease
+spec:
+  values:
+    grafana:
+      admin:
+        existingSecret: grafana-admin-credentials
+        userKey: admin-user
+        passwordKey: admin-password
+      ingress:
+        enabled: true
+        ingressClassName: traefik
+        hosts:
+          - grafana.joshlabs.me
+        path: /
+        tls:
+          - secretName: grafana-tls
+            hosts:
+              - grafana.joshlabs.me
+```
+
+The `tls` section references the Secret; it doesn't issue the certificate. Flux delivers the Secret, Helm renders the Ingress, and Traefik uses the certificate for incoming HTTPS connections. From Traefik to Grafana's Service, traffic still uses HTTP inside the cluster. That is the TLS boundary I configured.
+
+## The browser was right to complain
+
+After the push and reconciliation, I tested the endpoint using the certificate I'd just generated:
+
+```bash
+curl --cacert "$GRAFANA_TLS_DIR/grafana-tls.crt" \
+  -I https://grafana.joshlabs.me
+```
+
+`--cacert` supplies the trust material for this request, and `-I` asks for response headers. Curl returned:
+
+```text
+HTTP/2 302
+cache-control: no-store
+content-type: text/html; charset=utf-8
+location: /login
+```
+
+The browser still showed a certificate warning. That made sense once I separated the two tests. Curl had been told to trust this certificate; the browser hadn't. The successful request demonstrated that certificate validation could pass and that Grafana answered over HTTPS. It didn't add anything to my Mac's trust settings.
+
+Using `curl -k` would have skipped certificate verification and answered a weaker question. I wanted to know whether the certificate worked for the hostname, not just whether something was listening on port 443.
+
+I imported the public certificate into my macOS login keychain and added trust constrained to SSL and `grafana.joshlabs.me`. The private key stayed with the server-side configuration. Because this trusts an individual self-signed certificate, replacing it at renewal also means updating that trust on my Mac. Other devices need their own trust configuration.
+
+That was the part of this exercise I found most useful. Creating a certificate is easy enough to copy from an example. Seeing the same endpoint succeed in one client and warn in another made me think about which identity each client was actually prepared to trust.
+
+Grafana now has the address I wanted, with TLS terminating at Traefik and both its administrator credentials and certificate material delivered through SOPS and Flux. It remains a local service on a single physical machine. Automatic HTTP-to-HTTPS redirection is a separate setting; for these checks I requested HTTPS explicitly.
+
+The certificate gives me a renewal deadline: 8 December. Before it expires, I'll replace it through the same encrypted Secret manifest and keep the Ingress reference intact. For now, opening the dashboard no longer depends on finding the right terminal tab. I also understand considerably more about the connection that opens it.
