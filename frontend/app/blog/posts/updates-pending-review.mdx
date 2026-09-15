@@ -1,0 +1,212 @@
+---
+title: "Updates, Pending Review"
+publishedAt: "2026-09-15"
+summary: "Renovate's first run offered a Flux upgrade and three overlapping PRs. An hourly job, an encrypted token, and a useful reminder to read what the bot proposes."
+slug: "updates-pending-review"
+tags:
+  - homelab
+  - kubernetes
+  - k3s
+  - gitops
+  - flux
+  - renovate
+  - sops
+---
+
+I'd just worked through a monitoring upgrade by hand. It was worth doing: I knew which file controlled the chart version, how Flux picked up the change, and what to check afterwards. I also knew I didn't want checking release pages to become another regular evening activity.
+
+In [the previous post](/blog/grafana-gets-a-front-door), I moved `kube-prometheus-stack` from `66.6.0` to `89.2.2` before finishing Grafana's local Ingress and TLS setup. The chart was still pinned to an exact version. What I wanted next was something to notice when those pins needed attention.
+
+That became Renovate's job. Its first suggestion was to upgrade Flux itself, which seemed a fairly direct way to test the arrangement.
+
+## An hourly job on the ZBook
+
+I deployed Renovate into its own namespace as a Kubernetes CronJob. There's no reason for this instance to sit running between checks: it can start, process my repository, propose any updates it finds, and exit.
+
+I kept its manifests under `infrastructure/controllers`, with a base definition and a staging entry point. Renovate is part of how I maintain the lab, so that felt a better home than putting it beside Linkding. The configuration included a root-level `renovate.json` for repository-specific settings.
+
+This is the CronJob I deployed:
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: renovate
+  namespace: renovate
+spec:
+  schedule: "@hourly"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          automountServiceAccountToken: false
+          containers:
+            - name: renovate
+              image: renovate/renovate:44.82.0
+              args:
+                - joshzee/zbook-cluster
+              envFrom:
+                - secretRef:
+                    name: renovate-container-env
+                - configMapRef:
+                    name: renovate-configmap
+          restartPolicy: Never
+```
+
+For the initial deployment, I used version `44.82.0` rather than `latest`. The repository argument tells this instance which repository to process. In the ConfigMap, I set `RENOVATE_PLATFORM` to `github` and `RENOVATE_AUTODISCOVER` to `false`; I wanted this first deployment working against one deliberately selected repository.
+
+That selection is separate from the GitHub token's permissions. Telling the bot which repository to process doesn't, by itself, restrict what its credential is allowed to access.
+
+`@hourly` runs at the beginning of each hour. `Forbid` prevents overlapping scheduled Jobs from this CronJob, and the history limits keep one successful Job and three failed ones for inspection. They don't limit the number of future runs. [Kubernetes documents those scheduling and retention settings](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/).
+
+I allowed one retry through `backoffLimit: 1`. With `restartPolicy: Never`, the failed container isn't restarted inside the same Pod; the Job controller can create a replacement Pod for the retry. [Job retries are managed separately from container restarts](https://kubernetes.io/docs/concepts/workloads/controllers/job/).
+
+I also disabled automatic mounting of the Kubernetes service-account token. This process needs to talk to GitHub and dependency sources. It doesn't need a Kubernetes API credential simply because it happens to run in a Pod.
+
+## Reusing the secret-management work
+
+The GitHub token was the sensitive part. I'd already built a SOPS and age workflow for Linkding and Grafana, so I could use that again rather than create another out-of-band credential dependency.
+
+The encrypted manifest lives at `infrastructure/controllers/base/renovate/renovate-container-env-secret.yaml`. Its Kubernetes identity is `Secret/renovate/renovate-container-env`, and its key is `RENOVATE_TOKEN`. The CronJob's `envFrom.secretRef` imports that key as the environment variable Renovate expects. The separate ConfigMap supplies the non-sensitive settings.
+
+I used interactive input rather than placing a literal token in a shell command. From the repository root, with the destination directory already present, the generation and encryption steps were:
+
+```bash
+read -rs "RENOVATE_GITHUB_TOKEN?GitHub token for Renovate: "
+printf '\n'
+
+(
+  umask 077
+
+  kubectl create secret generic renovate-container-env \
+    --namespace=renovate \
+    --from-literal=RENOVATE_TOKEN="$RENOVATE_GITHUB_TOKEN" \
+    --dry-run=client \
+    -o yaml > infrastructure/controllers/base/renovate/renovate-container-env-secret.yaml
+)
+
+unset RENOVATE_GITHUB_TOKEN
+
+sops --encrypt --in-place \
+  infrastructure/controllers/base/renovate/renovate-container-env-secret.yaml
+```
+
+The `read` options prevent backslash interpretation and hide the input. The entered value stays out of shell history and isn't exported to child processes by default. It is still passed to `kubectl` when the shell expands the argument, so this reduces exposure rather than turning a shell variable into a secret store.
+
+The subshell's `umask 077` restricts permissions on the generated file during the short period before encryption. `--dry-run=client` produces the manifest locally, which also means the `renovate` namespace doesn't have to exist yet. At that stage, the token is only base64-encoded. SOPS is what encrypts the repository copy.
+
+My root `.sops.yaml` already matches files named `*-secret.yaml`, so the shorter encryption command picked up the existing age recipient and field rule. I checked the result without printing the token:
+
+```bash
+sops filestatus \
+  infrastructure/controllers/base/renovate/renovate-container-env-secret.yaml
+```
+
+It returned `{"encrypted":true}`.
+
+The new Flux Kustomization is named `infrastructure` and points to `./infrastructure/controllers/staging`. I enabled decryption under its `spec`, using the same bootstrap key Secret as the other reconciliation boundaries:
+
+```yaml
+# Under spec in clusters/staging/infrastructure.yaml
+decryption:
+  provider: sops
+  secretRef:
+    name: sops-age
+```
+
+The existing `apps` or monitoring decryption settings don't automatically apply to this new Kustomization. It needs its own reference. Flux then decrypts the manifest during reconciliation and applies the live Kubernetes Secret; Renovate receives the usable token at runtime. SOPS protects the Git copy, not the token from the process that needs to use it. [Flux's decryption configuration](https://fluxcd.io/flux/components/kustomize/kustomizations/#decryption) defines that boundary.
+
+## Checking the deployment before the first run
+
+Before committing, I built the staging resources locally and filtered the output to their identities:
+
+```bash
+kubectl kustomize infrastructure/controllers/staging \
+  | rg '^(kind:|  name:|  namespace:)'
+```
+
+That showed the Namespace, ConfigMap, Secret and CronJob, with the names and namespace I expected. It's a handy way to check the resource graph without printing Secret values. It doesn't apply anything to the cluster or replace schema validation.
+
+After committing and pushing, I reconciled the existing parent:
+
+```bash
+flux reconcile kustomization flux-system --with-source
+```
+
+The parent picked up `clusters/staging/infrastructure.yaml`; the new `infrastructure` Kustomization could then reconcile the Renovate resources beneath it.
+
+At first, `kubectl get all -n renovate` showed only the CronJob. That was the expected state before its first scheduled run. A CronJob is a schedule and a Job template, not a Deployment that continuously keeps a Pod alive. Also, `get all` doesn't include Secrets and ConfigMaps, despite the rather optimistic name.
+
+I wanted to test the actual GitHub connection without waiting for the next hour, so I created a one-off Job using the deployed template:
+
+```bash
+kubectl create job renovate-manual-test \
+  --from=cronjob/renovate \
+  --namespace=renovate
+
+kubectl logs job/renovate-manual-test \
+  --namespace=renovate \
+  --follow
+```
+
+This uses the same image, configuration and Secret references as the scheduled run. It starts a real Renovate process, including its ability to create branches and PRs. A separately created manual Job isn't covered by the CronJob's `Forbid` policy, so it shouldn't be started alongside a scheduled run.
+
+Once the container had started, Renovate processed the repository in about 46 seconds. Its logs reported 44 dependency entries across 13 files, with the devcontainer, Flux and Kubernetes managers active. The run finished with `result: "done"` and `exitCode: 0`.
+
+More importantly, there were actual update PRs in GitHub. That verified considerably more than the existence of a CronJob: the process could read the repository, identify dependencies, write branches and propose changes.
+
+## Four PRs, one Flux upgrade
+
+The first PR proposed Flux `v2.9.4` to `v2.9.5`. Three more proposed individual updates to Helm, Kustomize and Notification controller images.
+
+I looked through the full Flux PR before merging it. Only `clusters/staging/flux-system/gotk-components.yaml` had changed. Alongside the version labels, it contained all four controller image updates:
+
+| Controller | Before | After |
+|---|---|---|
+| source-controller | `v1.9.4` | `v1.9.5` |
+| kustomize-controller | `v1.9.4` | `v1.9.5` |
+| helm-controller | `v1.6.3` | `v1.6.4` |
+| notification-controller | `v1.9.3` | `v1.9.4` |
+
+Those target versions matched the [official Flux v2.9.5 release](https://github.com/fluxcd/flux2/releases/tag/v2.9.5). The changes stayed within the generated component manifest; the reconciliation paths and secret-decryption configuration I'd set up were untouched.
+
+The version labels needed a little care when reading the diff. A line such as `app.kubernetes.io/version: v2.9.5` identifies Flux's application version. It doesn't upgrade the Kubernetes server. The controller `image:` fields are what change the deployed binaries.
+
+Once I'd checked all four images, the overlap was clear: the three standalone controller PRs repeated changes already included in the full-release PR. I merged the full Flux update as one coordinated Git change. There was no need to merge the other three separately to reach those versions.
+
+Renovate's [Flux manager understands the generated system manifests](https://docs.renovatebot.com/modules/manager/flux/#flux-system-manifests-support), while its [Kubernetes manager can find individual container image references](https://docs.renovatebot.com/modules/manager/kubernetes/). The overlapping proposals were a useful sign that the matching rules need another look. I haven't changed those rules yet; keeping the generated Flux bundle out of individual image-update proposals is a follow-up configuration change.
+
+I was glad the first update gave me something real to review. The PR title alone wouldn't have explained why four proposals were effectively one maintenance change.
+
+## Checking what actually reached the cluster
+
+After merging, I requested a source refresh and reconciliation, then checked readiness and installed versions:
+
+```bash
+flux reconcile kustomization flux-system --with-source
+flux get kustomizations
+flux version
+```
+
+The version output was:
+
+```text
+flux: v2.9.4
+distribution: flux-v2.9.5
+helm-controller: v1.6.4
+kustomize-controller: v1.9.5
+notification-controller: v1.9.4
+source-controller: v1.9.5
+```
+
+The first line is my Mac's CLI. It stayed at `v2.9.4` because merging a Kubernetes manifest doesn't update a locally installed command. The distribution and controller lines showed the cluster had reached the versions I'd reviewed.
+
+That completed the first useful test of the arrangement. Renovate found an update and opened the PR. I checked its scope and release contents, merged it, and Flux reconciled the changed controller Deployments. I could then compare the running versions with the proposed ones.
+
+The version pins are still there. Renovate changes how I find out that a newer release exists; reviewing and accepting the replacement pin is still an operational decision. The hourly Job also depends on the ZBook running, just like the rest of this single-node lab.
+
+For now, I have a working update-proposal process and one verified upgrade through it. The next bit of housekeeping is reducing the duplicate Flux PRs. Checking release pages can be the bot's evening activity.
