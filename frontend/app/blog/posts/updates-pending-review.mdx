@@ -155,13 +155,13 @@ kubectl logs job/renovate-manual-test \
 
 This uses the same image, configuration and Secret references as the scheduled run. It starts a real Renovate process, including its ability to create branches and PRs. A separately created manual Job isn't covered by the CronJob's `Forbid` policy, so it shouldn't be started alongside a scheduled run.
 
-Once the container had started, Renovate processed the repository in about 46 seconds. Its logs reported 44 dependency entries across 13 files, with the devcontainer, Flux and Kubernetes managers active. The run finished with `result: "done"` and `exitCode: 0`.
+Once the container had started, Renovate processed the repository in about 46 seconds. Its logs reported 44 dependency entries across 13 files. The active managers were devcontainer and Flux, plus the Kubernetes manager. The run finished with `result: "done"` and `exitCode: 0`.
 
-More importantly, there were actual update PRs in GitHub. That verified considerably more than the existence of a CronJob: the process could read the repository, identify dependencies, write branches and propose changes.
+The update PRs were visible in GitHub too. Renovate had read the repository and identified dependencies, then written branches with proposed changes. The token and configuration worked for the full run.
 
 ## Four PRs, one Flux upgrade
 
-The first PR proposed Flux `v2.9.4` to `v2.9.5`. Three more proposed individual updates to Helm, Kustomize and Notification controller images.
+The first PR proposed Flux `v2.9.4` to `v2.9.5`. Three more proposed individual controller image updates: one each for Helm, Kustomize and Notification.
 
 I looked through the full Flux PR before merging it. Only `clusters/staging/flux-system/gotk-components.yaml` had changed. Alongside the version labels, it contained all four controller image updates:
 
@@ -205,8 +205,8 @@ source-controller: v1.9.5
 
 The first line is my Mac's CLI. It stayed at `v2.9.4` because merging a Kubernetes manifest doesn't update a locally installed command. The distribution and controller lines showed the cluster had reached the versions I'd reviewed.
 
-That completed the first useful test of the arrangement. Renovate found an update and opened the PR. I checked its scope and release contents, merged it, and Flux reconciled the changed controller Deployments. I could then compare the running versions with the proposed ones.
+The running versions matched the PR I'd reviewed and merged. Renovate's proposal had gone through Flux and reached the controller Deployments.
 
 The version pins are still there. Renovate changes how I find out that a newer release exists; reviewing and accepting the replacement pin is still an operational decision. The hourly Job also depends on the ZBook running, just like the rest of this single-node lab.
 
-For now, I have a working update-proposal process and one verified upgrade through it. The next bit of housekeeping is reducing the duplicate Flux PRs. Checking release pages can be the bot's evening activity.
+I still need to reduce the duplicate Flux PRs. Checking release pages can be the bot's evening activity.

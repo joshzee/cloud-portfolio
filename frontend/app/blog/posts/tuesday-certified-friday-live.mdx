@@ -4,13 +4,13 @@ publishedAt: "2025-05-23"
 summary: "Building a serverless AWS portfolio and a GitHub Actions pipeline that deploys it without long-lived cloud credentials."
 ---
 
-Three days after writing about passing the AWS Certified Cloud Practitioner exam, I was ready to document something more useful than another practice score: a system running in AWS that I had designed, connected and deployed myself.
+Three days after writing about passing the AWS Certified Cloud Practitioner exam, I had a system running in AWS to write about. I'd designed it myself and worked through the deployment.
 
 The [Cloud Resume Challenge](https://cloudresumechallenge.dev/docs/the-challenge/aws/) provided the outline. My version became [joshcodes.me](https://joshcodes.me): a Next.js portfolio with a serverless visitor counter and an automated route from a Git push to production.
 
-The certificate had tested whether I understood the services. This project tested whether I could make them cooperate.
+I knew the services from studying and supporting existing systems. This time, the decisions about how they fitted together were mine.
 
-## More than a résumé in a bucket
+## The site and its visitor counter
 
 The frontend is built with Next.js and exported as static files. Those files live in a private S3 bucket, with CloudFront acting as the public entry point. Route 53 handles the domain, while CloudFront serves the site over HTTPS and keeps the bucket away from direct public access.
 
@@ -24,7 +24,7 @@ The finished request path is:
 Browser -> API Gateway -> Lambda -> DynamoDB
 ```
 
-It is a deliberately small feature, but it forced the frontend, API, compute and database layers to cross service boundaries. The counter itself was not the difficult part. IAM permissions, request handling and making the response usable by a browser were where the useful work happened.
+The counter is a small feature that touches several services. Most of my work went into IAM permissions and request handling, including getting a response the browser could use.
 
 ## Removing permanent AWS keys from the pipeline
 
@@ -90,7 +90,7 @@ Push to main
     -> The updated site is live
 ```
 
-There were several workflow revisions before that sequence worked cleanly. That was the point of the project. The useful lesson was not that a YAML file can run shell commands; it was learning how GitHub's identity, an IAM trust policy, a private S3 origin and CloudFront's cache all affect the same deployment.
+It took several workflow revisions to get there. Each revision made me check another part of the deployment: GitHub's identity and the IAM trust policy, then the private S3 origin and CloudFront's cache.
 
 The complete project is available in the [cloud-portfolio repository](https://github.com/joshzee/cloud-portfolio).
 
@@ -101,5 +101,3 @@ The first successful end-to-end run did not need a lengthy announcement. The bui
 At that moment, a green GitHub Actions workflow was close enough to a sunset over the ocean.
 
 ![A successful GitHub Actions workflow](https://i.imgur.com/shRiLp5.gif)
-
-The certification gave me the vocabulary. The Cloud Resume Challenge gave me a working system—and several better questions about how to improve it.

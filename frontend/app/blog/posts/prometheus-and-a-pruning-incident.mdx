@@ -1,5 +1,5 @@
 ---
-title: "Prometheus, Pruning, and Recovery"
+title: "Prometheus and a Pruning Incident"
 summary: "Deploying kube-prometheus-stack through Flux and Helm, then tracing a pruning cascade through Git and recovering the cluster from desired state."
 publishedAt: "2026-09-04"
 slug: "prometheus-pruning-and-recovery"
@@ -15,13 +15,13 @@ tags:
   - troubleshooting
 ---
 
-The plan was to add monitoring to the homelab. Before I reached the first dashboard, I got a practical demonstration of why GitOps needs both observability and respect for `prune: true`.
+The plan was to add monitoring to the homelab. Before I reached the first dashboard, I'd accidentally caused Flux to delete Linkding and its data.
 
-I deployed the Prometheus community's `kube-prometheus-stack` through Flux and Helm. Along the way, a file-path error removed two Kustomization definitions from the active resource graph. Flux responded by deleting the resources they managed—including the Linkding and monitoring namespaces.
+I was deploying the Prometheus community's `kube-prometheus-stack` through Flux and Helm when I put two Kustomization definitions in the wrong directory. They disappeared from the rendered configuration. With pruning enabled, Flux deleted the resources they managed, including the Linkding and monitoring namespaces.
 
 The application definitions were still in Git. The application data was not.
 
-That made this phase about more than installing Prometheus and Grafana. It became an exercise in following controller ownership, reading reconciliation events, recovering from versioned desired state and separating persistent storage from an actual backup.
+I had to trace the deletions through Flux's events and Git history before I could restore the workloads. Recovering the manifests was possible. Recovering the data turned out to be a different problem.
 
 ## Helm without `helm install`
 
@@ -167,7 +167,7 @@ clusters/staging/flux-system/
 └── kustomization.yaml
 ```
 
-The files still existed, but existence is not inclusion. The nested `kustomization.yaml` only listed the generated Flux resources, so Kustomize did not include the two additional files in its rendered output.
+The nested `kustomization.yaml` only listed the generated Flux resources. My two files were still in Git, but Kustomize didn't include them in its rendered output.
 
 I then requested an immediate application reconciliation:
 
@@ -225,7 +225,7 @@ That separated three different questions:
 2. Which controller deleted the child Kustomization?
 3. What directory structure existed in the exact Git revision Flux applied?
 
-The repository was more than a deployment source here. It was the record needed to reproduce the controller's decision.
+Checking the exact Git revision let me see the configuration Flux had acted on.
 
 ## Correcting the graph
 
@@ -314,7 +314,7 @@ Persistence is a workload property. Backup and recovery are separate operational
 
 ## Finally, the dashboard
 
-Once the reconciliation hierarchy was healthy again, I verified the Helm source, release and monitoring workloads independently:
+Once the reconciliation hierarchy was healthy again, I checked the Helm source and release status. I also checked the pods in the monitoring namespace:
 
 ```bash
 flux get sources helm -A
@@ -335,10 +335,10 @@ At this checkpoint:
 
 - Flux manages the Prometheus community Helm repository and the pinned `kube-prometheus-stack` release from Git.
 - Monitoring has its own namespace, staging overlay and Flux reconciliation boundary.
-- The Flux Helm Controller manages installation, CRDs, upgrades and drift detection.
+- The Flux Helm Controller manages installation and upgrades, including CRDs, and checks for drift.
 - Prometheus and Grafana are running, with Grafana currently accessible through local port-forwarding.
 - A Git path error was traced through Flux events and an exact repository revision rather than repaired by guesswork.
 - Restoring two versioned declarations rebuilt the application and monitoring control paths.
 - The loss of the local-path volume proved that a PVC is not a backup.
 
-The next phase replaces Grafana's temporary port-forward with cluster ingress through Traefik. Before anything crosses that boundary, authentication, secrets and exposure deserve the same deliberate treatment as the deployment itself.
+Next, I'll give Grafana an address through Traefik so I can stop using the port-forward. Its administrator credential needs to move into a SOPS-managed Secret before I set up that access.

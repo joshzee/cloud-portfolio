@@ -12,9 +12,9 @@ tags:
   - github
 ---
 
-Until now, changing my cluster meant connecting to it and running a command. That is fine for proving the cluster works, but it leaves the most important question unanswered: what is the cluster *supposed* to look like?
+Until now, changing my cluster meant connecting to it and running a command. I could inspect the result, but I wanted a record of the configuration I intended to run.
 
-For the next phase, that answer will live in Git.
+For the next phase, I'd keep that configuration in Git.
 
 ## Why Flux?
 
@@ -24,7 +24,7 @@ Argo CD provides a prominent web interface as well as a CLI. Flux is more CLI- a
 
 That does not make Flux universally better, or Argo CD something I can ignore. It simply makes Flux a useful first implementation of GitOps because fewer details are hidden from me.
 
-The choice also has practical relevance for Azure-focused environments. Microsoft provides [Flux v2 as the `microsoft.flux` cluster extension](https://learn.microsoft.com/en-us/azure/azure-arc/kubernetes/conceptual-gitops-flux2) for both Azure Kubernetes Service and Azure Arc-enabled Kubernetes. Flux is not restricted to Azure—and Azure can also run Argo CD—but it has a clear first-party integration path there.
+Flux also has a place in Azure environments. Microsoft provides [Flux v2 as the `microsoft.flux` cluster extension](https://learn.microsoft.com/en-us/azure/azure-arc/kubernetes/conceptual-gitops-flux2) for both Azure Kubernetes Service and Azure Arc-enabled Kubernetes. That integration interested me, though Flux works outside Azure and Argo CD can run there too.
 
 ## Preparing the repository
 
@@ -77,7 +77,7 @@ The `helm-controller` line initially looked familiar because K3s already include
 
 K3s's controller reconciles `HelmChart` resources from the `helm.cattle.io` API group and currently manages the packaged Traefik installation in my cluster. [Flux's controller](https://fluxcd.io/flux/components/helm/helmreleases/) runs as a deployment in `flux-system` and reconciles `HelmRelease` resources from `helm.toolkit.fluxcd.io`.
 
-They can coexist because they watch different APIs. I still need to maintain a clear ownership boundary: K3s owns its packaged components, while Flux will own Helm releases declared through my GitOps repository. Having two reconcilers attempt to manage the same release would replace clarity with a particularly unhelpful tug-of-war.
+They can coexist because they watch different APIs. In this lab, K3s owns its packaged components, while Flux will own Helm releases declared through my GitOps repository. I need to keep those responsibilities separate so the controllers don't try to manage the same release.
 
 ## GitOps is installed, but not yet proven
 
@@ -91,4 +91,4 @@ For now, the checkpoint is straightforward:
 - Git now contains the machinery that keeps the GitOps installation in place.
 - No application workload has been handed over to Flux yet.
 
-The next step is to commit a real desired state and watch the cluster move towards it. Git has the keys; now it needs somewhere to drive.
+The next test is an application deployment: commit its manifests and check whether Flux creates the workload.

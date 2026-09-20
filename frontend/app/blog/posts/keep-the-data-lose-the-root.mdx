@@ -14,11 +14,11 @@ tags:
   - linkding
 ---
 
-My first GitOps deployment of Linkding worked, but it had two undesirable properties: replacing its pod erased its memory, and Kubernetes was not enforcing a non-root runtime identity—opening a shell placed me inside the container as root.
+My first GitOps deployment of Linkding worked, but replacing its pod lost the application data. Opening a shell also placed me inside the container as root. Kubernetes wasn't enforcing a non-root runtime identity.
 
 Neither is a great characteristic for an application I eventually intend to expose beyond my own network.
 
-This phase gave Linkding persistent storage, proved that the data survived a pod replacement and then reduced the privileges of the process using that data. The order matters. Persistence made the application useful; security made the next step less reckless.
+I started with persistent storage and tested it by replacing the pod. Once that worked, I reduced the container's privileges and checked that Linkding could still write to its database.
 
 ## Declaring storage in Git
 
@@ -77,7 +77,7 @@ volumes:
       claimName: linkding-data-pvc
 ```
 
-Because YAML regards whitespace as syntax rather than a suggestion, I also made Vim expand tabs into two spaces and highlight trailing whitespace:
+To avoid indentation mistakes in YAML, I also made Vim expand tabs into two spaces and highlight trailing whitespace:
 
 ```vim
 set tabstop=2
@@ -116,7 +116,7 @@ Selected Node: lab-node-01
 
 The Flux labels on the PVC also identified the `apps` Kustomization as its manager. The storage existed because Git declared it and Flux reconciled it.
 
-There is an important limitation hiding in `Selected Node: lab-node-01`. This is local storage on the ZBook, not shared storage available from every machine in the cluster. It suits the current single-node lab, but a future Raspberry Pi worker will not magically gain access to the same disk. A multi-node storage design will require an appropriate storage provider and its own trade-offs.
+`Selected Node: lab-node-01` tells me where the data lives: on the ZBook's disk. It suits the current single-node lab, but a future Raspberry Pi worker won't have access to that volume. I'll need to review the storage provider when I add another node.
 
 It is also persistence, not a backup or a high-availability design. The data now outlives a pod, but it still depends on the ZBook and its disk.
 
@@ -154,7 +154,7 @@ kubectl exec -n linkding deployment/linkding -- \
 
 The result contained Linkding's SQLite database and associated write-ahead-log files, along with its assets, favicons and previews. Combined with the bound claim and the surviving application data, that completed the persistence test.
 
-The pod was disposable. Its state no longer was.
+I could now replace a pod without losing my bookmarks.
 
 ## Persistent, but still root
 
@@ -171,7 +171,7 @@ root:x:0:0:root:/root:/bin/bash
 www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
 ```
 
-The mounted Linkding data was already owned by `www-data`. UID and GID `33` were therefore the appropriate identity for the workload—not an arbitrary non-root number that might leave Linkding unable to write its database.
+The mounted Linkding data was already owned by `www-data`, so I chose UID and GID `33` for the workload. Choosing a different non-root identity could have left Linkding unable to write its database.
 
 I added a pod-level security context to set the runtime user and group, with `fsGroup` providing the group ownership needed for the mounted volume:
 
@@ -240,7 +240,7 @@ www-data@linkding-...:/etc/linkding$ sudo -i
 bash: sudo: command not found
 ```
 
-The useful result is not that the container became read-only—it did not. Linkding still needs write access to `/etc/linkding/data`. The improvement is that Kubernetes now enforces the permissions required to run the application without also accepting the image's default UID `0` identity and its much larger blast radius.
+Linkding could still write to `/etc/linkding/data`, as it needs to. Kubernetes now enforced UID `33` instead of accepting the image's default UID `0`. The container filesystem remained writable wherever that user had permission.
 
 The missing `sudo` command is typical of a minimal container image, while the failed package-manager operation demonstrates the consequence of the non-root identity. The most direct check remains `whoami`: the workload now runs as `www-data`.
 
@@ -280,7 +280,7 @@ FileNotFoundError: No usable temporary directory found in
 ['/tmp', '/var/tmp', '/usr/tmp', '/etc/linkding']
 ```
 
-The Linkding image needs writable runtime paths in addition to its persistent data directory. A read-only root filesystem could potentially be supported with carefully placed ephemeral volumes and further image-specific configuration, but that was no longer a harmless security flag. It was a compatibility project of its own.
+The Linkding image needs writable runtime paths in addition to its persistent data directory. Supporting a read-only root filesystem might require ephemeral volumes at those paths and more image-specific configuration. I hadn't tested that setup, so I decided to revert this change.
 
 Because the experiment was isolated in Git, recovery was direct. I found the commit, reverted it and pushed the new inverse commit:
 
@@ -292,7 +292,7 @@ flux reconcile kustomization apps --with-source
 
 Flux did not roll the failed change back automatically. I diagnosed the failure and declared the rollback in Git; Flux then reconciled that known-good state. The Deployment produced a healthy replacement pod, the logs returned to normal and Linkding came back with its persisted data intact.
 
-This is hardening, not a declaration that the application is now secure. The test established which controls the workload supports and recorded the rejected one just as clearly as the accepted ones. Network policy, secret management, image maintenance and other controls remain separate concerns.
+The commits now record which controls worked with this image and which one failed. Network policy and secret management still need attention, as does keeping the image up to date.
 
 At this checkpoint:
 
@@ -307,4 +307,4 @@ At this checkpoint:
 - A read-only root filesystem was tested, shown to be incompatible with the current image and reverted through Git.
 - The application remains reachable only through a local port-forward.
 
-The next phase changes that final point. I will expose Linkding through a Cloudflare Tunnel. Before giving it a route to the public internet, Linkding can now keep its memory—and has forgotten how to be root.
+Next, I'll expose Linkding through a Cloudflare Tunnel. I have a working storage configuration and tested permissions to carry into that setup.

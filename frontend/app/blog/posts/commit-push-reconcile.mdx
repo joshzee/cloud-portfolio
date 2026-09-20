@@ -12,9 +12,7 @@ tags:
   - linkding
 ---
 
-Installing Flux gave my cluster a GitOps controller. It did not yet prove I had a GitOps workflow.
-
-That required a commit in Git to produce something real inside Kubernetes. For the first workload, I deployed [Linkding](https://github.com/sissbruecker/linkding), a self-hosted bookmark manager, into its own namespace.
+Flux was installed and watching the repository. I wanted to test it with an application, so I chose [Linkding](https://github.com/sissbruecker/linkding), a self-hosted bookmark manager, and gave it its own namespace.
 
 The rule for this exercise was simple: define the desired state, push it to Git and let Flux perform the deployment. No `kubectl apply`.
 
@@ -33,7 +31,7 @@ NAME          URL                                        READY   STATUS
 flux-system   ssh://git@github.com/joshzee/zbook-cluster True    stored artifact for revision 'main@sha1:44b008d2...'
 ```
 
-That status meant the Source Controller had fetched the repository and stored an artifact for the displayed commit. The cluster had a source; the next step was giving it an application structure to follow.
+That status meant the Source Controller had fetched the repository and stored an artifact for the displayed commit. I could now add the application manifests under the path Flux was watching.
 
 ## Giving the repository a shape
 
@@ -163,7 +161,7 @@ NAME                        READY   STATUS    RESTARTS
 linkding-678cf4b484-kmtxf   1/1     Running   0
 ```
 
-The distinction matters: GitOps did not eliminate the Kubernetes CLI. It removed the need to use the CLI for routine, imperative mutation. I used `kubectl` to inspect the result, not to create it.
+I still used `kubectl` throughout this process to inspect namespaces and pods. Flux handled their creation from the manifests I'd committed.
 
 To reach the application locally, I forwarded port `8080` on my MacBook to port `9090` in the deployment:
 
@@ -181,4 +179,4 @@ At this checkpoint:
 - `kubectl apply` played no part in the deployment.
 - Linkding is still temporary, locally accessible and not yet hardened.
 
-The next phases will give it persistent storage, improve its security and expose it beyond a port-forward. GitOps has delivered the application; now the application needs to survive real use.
+Before I start keeping bookmarks in it, Linkding needs persistent storage and tighter permissions. Access beyond the local port-forward will come after that.
