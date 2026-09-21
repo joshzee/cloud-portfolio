@@ -1,4 +1,4 @@
-import { getBlogPosts } from "app/blog/utils";
+import { getBlogPosts, getBlogTags } from "app/blog/utils";
 
 export const baseUrl = "https://joshcodes.me";
 
@@ -12,6 +12,10 @@ export default async function sitemap() {
 		url: `${baseUrl}${route}`,
 		lastModified: new Date().toISOString().split("T")[0],
 	}));
+	let tags = getBlogTags().map((tag) => ({
+		url: `${baseUrl}/blog/tags/${encodeURIComponent(tag)}`,
+		lastModified: new Date().toISOString().split("T")[0],
+	}));
 
-	return [...routes, ...blogs];
+	return [...routes, ...blogs, ...tags];
 }

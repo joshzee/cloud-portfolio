@@ -15,6 +15,8 @@
 	--sh-jsxliterals: #6266d1;
 	--sh-property: #e25a1c;
 	--sh-entity: #e25a1c;
+	--tag-background: rgb(100 183 185 / 30%);
+	--tag-foreground: #397d7f;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -23,6 +25,7 @@
 		--sh-identifier: white;
 		--sh-keyword: #f47067;
 		--sh-string: #0fa295;
+		--tag-foreground: #8bd0d2;
 	}
 	html {
 		color-scheme: normal;
@@ -31,6 +34,43 @@
 	.max-w-xl {
 		max-width: 43rem;
 	}
+}
+
+.tag-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4rem;
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.tag-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.18rem;
+	padding: 0.22rem 0.62rem;
+	border: 1px solid color-mix(in srgb, var(--tag-foreground) 28%, transparent);
+	border-radius: 9999px;
+	background: var(--tag-background);
+	color: var(--tag-foreground);
+	font-size: 0.8rem;
+	font-weight: 500;
+	line-height: 1.15;
+	text-decoration: none;
+	transition: background-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.tag-chip:hover,
+.tag-chip:focus-visible {
+	background: #64b7b9;
+	color: #0e292a;
+	transform: translateY(-1px);
+}
+
+.tag-chip:focus-visible {
+	outline: 2px solid #64b7b9;
+	outline-offset: 2px;
 }
 
 html {

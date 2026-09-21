@@ -3,6 +3,7 @@ import { CustomMDX } from "app/components/mdx";
 import { formatDate, getBlogPosts } from "app/blog/utils";
 import { baseUrl } from "app/sitemap";
 import ParticlesBackrgound from "app/components/ParticlesBackrgound";
+import { TagList } from "app/components/tags";
 
 export async function generateStaticParams() {
 	let posts = getBlogPosts();
@@ -87,10 +88,13 @@ export default function Blog({ params }) {
 			<h1 className="title font-semibold text-2xl tracking-tighter">
 				{post.metadata.title}
 			</h1>
-			<div className="flex justify-between items-center mt-2 mb-8 text-sm">
+			<div className="flex justify-between items-center mt-2 text-sm">
 				<p className="text-sm text-neutral-600 dark:text-neutral-400">
 					{formatDate(post.metadata.publishedAt)}
 				</p>
+			</div>
+			<div className="mt-4 mb-8">
+				<TagList tags={post.metadata.tags} />
 			</div>
 			<article className="prose">
 				<CustomMDX source={post.content} />
