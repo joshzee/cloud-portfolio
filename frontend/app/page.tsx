@@ -1,6 +1,4 @@
-import { BlogPosts } from "app/components/posts";
-import { ExperienceList } from "app/components/experience";
-import { ProjectList } from "app/components/projects";
+import { LatestBlogPosts } from "app/components/posts";
 import ParticlesBackrgound from "app/components/ParticlesBackrgound";
 import Image from "next/image";
 import ProfilePic from "./images/self.jpg";
@@ -29,11 +27,7 @@ export default function Page() {
 			Away from terminals, I’m usually training, catching up on comics or spending time with my partner and elderly dog. I’m looking for a collaborative DevOps or SRE team where I can contribute strong operational judgement while continuing to grow as an engineer.
 			</p>
 
-
-
-			{/* <div className="my-8">
-				<ProjectList />
-			</div> */}
+			<LatestBlogPosts />
 			
 			<ParticlesBackrgound />
 		</section>
