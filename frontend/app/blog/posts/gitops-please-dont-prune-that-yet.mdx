@@ -1,0 +1,137 @@
+---
+title: "GitOps, Please Don’t Prune That Yet"
+publishedAt: "2026-09-28"
+summary: "Renaming the homelab repository was straightforward. Moving two live Grafana Secrets between Flux Kustomizations meant handing over ownership without letting pruning delete them."
+slug: "gitops-please-dont-prune-that-yet"
+tags:
+  - homelab
+  - kubernetes
+  - k3s
+  - gitops
+  - flux
+  - sops
+  - grafana
+---
+
+I had two bits of housekeeping to do in my homelab repository. The first was finally renaming `zbook-cluster` to `homelab`. The second was moving Grafana's encrypted Secrets out of the directory that installs the monitoring stack.
+
+The rename was mostly a search-and-replace job with consequences. The Secret move looked like ordinary file organisation and turned out to be the one that needed a handover plan.
+
+## A repository rename has more than one audience
+
+GitHub renamed the repository and kept a redirect from the old URL. That redirect was useful as a bridge: Flux could still fetch the commit that changed its source to the new address.
+
+I updated three active references:
+
+- the local Git remote;
+- the URL in Flux's `GitRepository/flux-system`;
+- the repository argument passed to Renovate.
+
+The Flux object remained named `flux-system`. Its name is a Kubernetes identifier, not the GitHub repository name. Only its `spec.url` needed to move from `joshzee/zbook-cluster` to `joshzee/homelab`.
+
+After pushing the change, I checked the live GitRepository URL, the fetched revision and every Flux Kustomization. Linkding and Grafana were still reachable. I then renamed the local working directory, which has no effect on the cluster because Flux reads from GitHub rather than my MacBook's filesystem.
+
+There may always be historical mentions of the old name in Git commits, and GitHub may retain its compatibility redirect. The active configuration now points directly at `homelab`; it does not depend on that redirect.
+
+## Controllers and configuration were sharing a drawer
+
+My monitoring layout installed `kube-prometheus-stack` and also carried two environment-specific Secrets:
+
+```text
+monitoring/controllers/staging/kube-prometheus-stack/
+├── grafana-admin-secret.yaml
+├── grafana-tls-secret.yaml
+└── kustomization.yaml
+```
+
+Both files were already encrypted with SOPS, so this wasn't a repair for exposed credentials. It was an ownership change.
+
+The revised split is:
+
+```text
+monitoring/
+├── controllers/
+│   └── ... HelmRepository and HelmRelease
+└── configs/
+    └── staging/kube-prometheus-stack/
+        ├── grafana-admin-secret.yaml
+        ├── grafana-tls-secret.yaml
+        └── kustomization.yaml
+```
+
+`monitoring-controllers` owns the machinery that installs and operates the stack. `monitoring-configs` owns the values my staging environment supplies to it. That gives each side its own Flux status, reconciliation and inventory. It also keeps SOPS decryption on the Kustomization that actually needs it.
+
+This is a useful boundary, but it isn't a security wall. Both Kustomizations are reconciled by the same Flux controllers in this cluster. The benefit is clearer ownership and a smaller blast radius when configuration changes.
+
+The directory names themselves have no special meaning to Flux. The separation exists because two Flux `Kustomization` resources point at two different `spec.path` values.
+
+## Moving a file can delete a live object
+
+Flux records an inventory of the Kubernetes objects applied by each Kustomization. With `prune: true`, an object that disappears from that Kustomization's rendered output is removed from the cluster.
+
+That makes a Git move more interesting than it looks:
+
+```text
+old owner stops rendering Secret
+  -> old owner prunes Secret
+  -> new owner applies Secret
+```
+
+The final state may be correct, but a delete-and-recreate in the middle is poor change control. Ordering can also turn it into an outage. The two Grafana Secrets already existed and worked; I wanted their ownership to change without changing the objects.
+
+Flux documents a safe pattern for [moving resources between Kustomizations](https://fluxcd.io/flux/faq/#how-can-i-safely-move-resources-from-one-dir-to-another): temporarily disable pruning on the old owner, apply the resource through the new owner, verify the handover, then restore pruning.
+
+## The handover
+
+Before changing Git, I recorded the current ownership tree and both Secret UIDs. A Kubernetes UID belongs to one particular object lifetime. If it stayed the same after the move, the Secret had been updated in place rather than deleted and recreated.
+
+I then changed `monitoring-controllers` to `prune: false`, committed that change by itself and reconciled it. Checking the live Kustomization mattered here. A line in my working tree would offer no protection until Flux had applied it.
+
+With pruning paused, I moved the two encrypted manifests into `monitoring/configs/staging/kube-prometheus-stack` and added a new cluster entry point:
+
+```yaml
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: monitoring-configs
+  namespace: flux-system
+spec:
+  interval: 1m0s
+  retryInterval: 1m
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./monitoring/configs/staging
+  prune: true
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+```
+
+The old overlay no longer listed the Secret files. The new one listed exactly those two. I checked both with `kubectl kustomize` and confirmed SOPS still reported each manifest as encrypted before committing.
+
+Once the parent had created `monitoring-configs`, I reconciled the new owner first and the old owner second:
+
+```bash
+flux reconcile kustomization flux-system --with-source
+flux reconcile kustomization monitoring-configs
+flux reconcile kustomization monitoring-controllers
+```
+
+The first command made Flux fetch the latest repository revision and asked the parent Kustomization to apply the new reconciliation definition. The second made the new owner decrypt and apply the Secrets. Only then did I reconcile the old owner, which was still forbidden from pruning them.
+
+`flux tree kustomization monitoring-configs` showed both Secrets under their new owner. The old tree no longer showed them as direct resources. Most importantly, their UIDs matched the values I'd recorded before the move.
+
+Same live objects. New Flux inventory.
+
+I finished with one more commit: restore `prune: true` on `monitoring-controllers` and remove its now-unused SOPS decryption block. `monitoring-configs` kept decryption enabled because it owns the encrypted manifests.
+
+## One dependency remains
+
+The `monitoring` Namespace is still created by `monitoring-controllers`, while `monitoring-configs` writes Secrets into it. On this running cluster the Namespace already exists. During a completely fresh build, the config reconciliation may arrive before the Namespace and retry after it appears.
+
+That is acceptable for the current lab, although a larger setup could make the ordering explicit with a small bootstrap Kustomization and `dependsOn`. Splitting ownership made the dependency easier to see, which is already an improvement.
+
+After the final reconciliation, Grafana loaded over HTTPS, accepted the existing credentials, populated its dashboards and kept Prometheus as its data source. The matching Secret UIDs were the detail I cared about most. Nothing had blinked out while I rearranged Git.
