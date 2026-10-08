@@ -1,0 +1,221 @@
+---
+title: "The Database Remembered Root"
+publishedAt: "2026-10-08"
+summary: "Building Audiobookshelf through GitOps with a ConfigMap, retained storage, a non-root runtime and a Cloudflare Tunnel credential protected by SOPS."
+slug: "the-database-remembered-root"
+tags:
+  - homelab
+  - kubernetes
+  - k3s
+  - gitops
+  - flux
+  - storage
+  - security
+  - sops
+  - cloudflare
+---
+
+Audiobookshelf was my chance to build one application all the way through. I had already used Flux, Kustomize, persistent storage, SOPS and Cloudflare Tunnel elsewhere in the homelab. This time I wanted to put the pieces together myself and find out whether I understood the joins between them.
+
+The target was modest: run Audiobookshelf on port 3005, keep its data, stop running it as root and make it reachable from the internet. Every cluster change still had to begin in Git.
+
+## Start with the smallest useful deployment
+
+I added Audiobookshelf to the existing application layout:
+
+```text
+apps/
+├── base/audiobookshelf/
+└── staging/audiobookshelf/
+```
+
+The base owns resources the application needs in any environment. The staging overlay carries the parts specific to this cluster, including external access and its encrypted tunnel credential.
+
+The first version used the pinned image `ghcr.io/advplyr/audiobookshelf:2.36.1`. A ConfigMap supplied the requested port, and the Deployment imported it through `envFrom`:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: audiobookshelf-configmap
+data:
+  PORT: "3005"
+```
+
+```yaml
+envFrom:
+  - configMapRef:
+      name: audiobookshelf-configmap
+```
+
+The application stayed behind a private ClusterIP Service:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: audiobookshelf
+spec:
+  selector:
+    app: audiobookshelf
+  type: ClusterIP
+  ports:
+    - name: http
+      protocol: TCP
+      port: 3005
+      targetPort: 3005
+```
+
+My first Flux reconciliation timed out, but the useful message was in the controller error. I had written the four Service port fields as four YAML list items instead of one mapping. Kubernetes saw duplicate entries with the default `port=0`. Putting `name`, `protocol`, `port` and `targetPort` under the same dash fixed the object.
+
+Once Flux applied the correction, I could forward the Service and upload an audio file:
+
+```bash
+kubectl port-forward \
+  --namespace=audiobookshelf \
+  service/audiobookshelf 8080:3005
+```
+
+That was enough proof for the stateless version. The next reconciliation had to keep what I put into it.
+
+## Four paths, four claims
+
+Audiobookshelf documents four persistent paths: `/config`, `/metadata`, `/audiobooks` and `/podcasts`. I gave each one its own claim rather than hiding different kinds of data inside one volume.
+
+| Path | Requested storage | Purpose |
+|---|---:|---|
+| `/config` | 1Gi | Application configuration and database |
+| `/metadata` | 1Gi | Metadata, cache and logs |
+| `/audiobooks` | 5Gi | Audiobook files |
+| `/podcasts` | 5Gi | Podcast files |
+
+All four claims use `ReadWriteOnce`. That means read-write access from one node; it does not mean only one Pod can ever reference the volume.
+
+The earlier pruning incident had already shown me what the default `Delete` reclaim policy could do. For these claims I added a second StorageClass through the infrastructure reconciliation path:
+
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-path-retain
+provisioner: rancher.io/local-path
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+```
+
+Each claim explicitly selects `local-path-retain`. If a claim is deleted, Kubernetes leaves the released PV and its node-local data behind for manual recovery. That is a useful guardrail, but it is not a backup. A failed disk or lost node would still take the only copy with it.
+
+I also changed the Deployment strategy to `Recreate`. Audiobookshelf is a single replica using SQLite and node-local claims, so I do not want an old and new application Pod overlapping during a rollout.
+
+That change exposed another piece of live state. The existing Deployment still carried the old `rollingUpdate` subfield, and the API rejected a strategy containing both `type: Recreate` and rolling-update settings. After removing the stale field, the committed manifest could stay clean:
+
+```yaml
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+```
+
+## The database remembered root
+
+The Audiobookshelf image already contains a `node` account:
+
+```text
+uid=1000(node) gid=1000(node)
+```
+
+I used that identity in the Pod security context and kept the container-specific controls alongside the container:
+
+```yaml
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: audiobookshelf
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+```
+
+The replacement Pod failed. Its logs were much more useful than the status:
+
+```text
+SQLITE_READONLY: attempt to write a readonly database
+EACCES: permission denied, open '/metadata/logs/crash_logs.txt'
+```
+
+UID 1000 was correct. The files were the problem.
+
+Audiobookshelf had already populated the volumes while running as root. Changing `runAsUser` changes the process identity; it does not transfer ownership of files that already exist on a persistent volume. The database and metadata had survived the rollout, complete with their old ownership.
+
+I added a temporary init container that mounted the same four claims and ran before Audiobookshelf:
+
+```sh
+chown -R 1000:1000 /config /metadata /audiobooks /podcasts
+```
+
+The init container ran with only the permissions needed for that migration. Once it completed, the main container started as `node` and could write to SQLite and `/metadata` again. I then removed the migration container from the Deployment; recursively changing a growing media library on every restart would be wasteful.
+
+Had the non-root identity been present when the empty claims were first mounted, UID 1000 would likely have created the files itself. Introducing the controls later turned hardening into a small data migration. Loosening the security context would have hidden that rather than fixing it.
+
+## The public route does not use Traefik
+
+The application still had only a ClusterIP Service. I created a separate locally managed Cloudflare Tunnel and routed `abs.joshlabs.me` through two `cloudflared` replicas in the `audiobookshelf` namespace.
+
+The request path is:
+
+```text
+Browser
+  -> Cloudflare edge
+  -> encrypted tunnel
+  -> cloudflared Pod
+  -> audiobookshelf ClusterIP Service :3005
+  -> Audiobookshelf Pod
+```
+
+There is no Kubernetes Ingress in that path. The `ingress` block below belongs to `cloudflared`; it maps a public hostname to an internal service:
+
+```yaml
+data:
+  config.yaml: |
+    tunnel: <TUNNEL-UUID>
+    credentials-file: /etc/cloudflared/creds/credentials.json
+
+    metrics: 0.0.0.0:2000
+    no-autoupdate: true
+
+    ingress:
+      - hostname: abs.joshlabs.me
+        service: http://audiobookshelf:3005
+      - service: http_status:404
+```
+
+The tunnel credential began as a UUID-named JSON file on my MacBook. I imported it under the stable Secret key `credentials.json`, encrypted the manifest immediately and committed only the SOPS ciphertext:
+
+```bash
+kubectl create secret generic tunnel-credentials \
+  --namespace=audiobookshelf \
+  --from-file=credentials.json="$HOME/.cloudflared/<TUNNEL-UUID>.json" \
+  --dry-run=client \
+  -o yaml > apps/staging/audiobookshelf/abs-cloudflare-secret.yaml
+
+sops --encrypt --in-place \
+  apps/staging/audiobookshelf/abs-cloudflare-secret.yaml
+```
+
+Flux decrypts that file while reconciling the `apps` Kustomization. Kubernetes mounts the Secret key at `/etc/cloudflared/creds/credentials.json`, which is the path in the tunnel configuration.
+
+That credential authenticates the connector to Cloudflare. It has nothing to do with the Audiobookshelf login. The application account remains part of the state under `/config`, protected by Audiobookshelf itself.
+
+## What is running now
+
+The committed state now contains a port configured through a ConfigMap, a private Service, four retained PVCs, a non-root application container and a version-pinned Cloudflare connector. The public hostname loads through the tunnel, while the application Service has no external IP and no router port has been opened.
+
+This is still one K3s node with local storage. `Retain` gives me a better recovery position after an accidental claim deletion, but I still need an off-node backup and a restore test before the media or database can be considered recoverable. That is the part a green Pod cannot prove.
