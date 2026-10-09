@@ -5,6 +5,11 @@ import { baseUrl } from "app/sitemap";
 import ParticlesBackrgound from "app/components/ParticlesBackrgound";
 import { TagList } from "app/components/tags";
 
+const getOpenGraphImage = (image?: string) =>
+	image
+		? new URL(image, baseUrl).toString()
+		: `${baseUrl}/og/default.png`;
+
 export async function generateStaticParams() {
 	let posts = getBlogPosts();
 
@@ -25,9 +30,7 @@ export function generateMetadata({ params }) {
 		summary: description,
 		image,
 	} = post.metadata;
-	let ogImage = image
-		? image
-		: `${baseUrl}/og?title=${encodeURIComponent(title)}`;
+	let ogImage = getOpenGraphImage(image);
 
 	return {
 		title,
@@ -41,6 +44,9 @@ export function generateMetadata({ params }) {
 			images: [
 				{
 					url: ogImage,
+					width: 1200,
+					height: 627,
+					alt: title,
 				},
 			],
 		},
@@ -74,9 +80,7 @@ export default function Blog({ params }) {
 						datePublished: post.metadata.publishedAt,
 						dateModified: post.metadata.publishedAt,
 						description: post.metadata.summary,
-						image: post.metadata.image
-							? `${baseUrl}${post.metadata.image}`
-							: `/og?title=${encodeURIComponent(post.metadata.title)}`,
+						image: getOpenGraphImage(post.metadata.image),
 						url: `${baseUrl}/blog/${post.slug}`,
 						author: {
 							"@type": "Person",

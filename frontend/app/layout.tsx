@@ -6,6 +6,8 @@ import { Navbar } from "./components/nav";
 import Footer from "./components/footer";
 import { baseUrl } from "./sitemap";
 
+const defaultOgImage = new URL("/og/default.png", baseUrl).toString();
+
 export const metadata: Metadata = {
 	metadataBase: new URL(baseUrl),
 	title: {
@@ -20,6 +22,20 @@ export const metadata: Metadata = {
 		siteName: "Joshua Zarazovski",
 		locale: "en_US",
 		type: "website",
+		images: [
+			{
+				url: defaultOgImage,
+				width: 1200,
+				height: 627,
+				alt: "Joshua Zarazovski portfolio",
+			},
+		],
+	},
+	twitter: {
+		card: "summary_large_image",
+		title: "Joshua Zarazovski",
+		description: "Portfolio by Joshua Zarazovski.",
+		images: [defaultOgImage],
 	},
 	robots: {
 		index: true,
