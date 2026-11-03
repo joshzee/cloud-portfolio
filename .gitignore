@@ -1,3 +1,6 @@
+# mac
+.DS_Store
+
 # dependencies
 frontend/node_modules
 frontend/.pnp
